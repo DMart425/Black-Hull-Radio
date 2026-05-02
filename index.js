@@ -25,7 +25,6 @@ const {
 
 const token = process.env.DISCORD_TOKEN;
 const guildId = process.env.GUILD_ID;
-const voiceChannelId = process.env.AFK_VOICE_CHANNEL_ID;
 const commandChannelId = process.env.COMMAND_CHANNEL_ID || '1487965611685314700';
 const adminCommandChannelId = process.env.ADMIN_COMMAND_CHANNEL_ID || '1490421177213260036';
 const audioDir = path.resolve(process.env.AUDIO_DIR || './audio');
@@ -60,8 +59,8 @@ const officerRoleIds = (process.env.DISCORD_OFFICER_ROLE_IDS || '').split(',').m
 const staffRoleIds = [...new Set([...adminRoleIds, ...officerRoleIds])];
 const partyApiPort = Math.max(1024, Number(process.env.PARTY_API_PORT || '3002'));
 
-if (!token || !guildId || !voiceChannelId) {
-  console.error('Missing DISCORD_TOKEN, GUILD_ID, or AFK_VOICE_CHANNEL_ID in .env');
+if (!token || !guildId) {
+  console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
   process.exit(1);
 }
 
@@ -347,6 +346,7 @@ function looksLikeRsiStatusUrl(value) {
 function looksLikePatchNotesArticleUrl(value) {
   const url = normalizeArticleUrl(value);
   return /robertsspaceindustries\.com\/(?:en\/)?patch-notes(?:\/|$)/iu.test(url)
+    || /robertsspaceindustries\.com\/comm-link\/patch-notes\//iu.test(url)
     || /robertsspaceindustries\.com\/spectrum\/community\/SC\/forum\/\d+\/thread\/.+(?:patch-notes|release-notes)/iu.test(url);
 }
 
@@ -368,7 +368,7 @@ function parseDateString(value) {
 }
 
 function extractXmlTag(block, tagName) {
-  const regex = new RegExp(`<${tagName}[^>]*>([\s\S]*?)<\/${tagName}>`, 'iu');
+  const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\/${tagName}>`, 'iu');
   const match = block.match(regex);
   return match ? match[1] : '';
 }
@@ -998,6 +998,7 @@ function dedupePatchNotesItems(items) {
     const patchUrl = looksLikePatchNotesArticleUrl(link);
     const patchTitle = looksLikePatchNotesTitle(title);
     const patchContextLink = /robertsspaceindustries\.com\/(?:en\/)?patch-notes(?:\/|$)/iu.test(link)
+      || /robertsspaceindustries\.com\/comm-link\/patch-notes\//iu.test(link)
       || /robertsspaceindustries\.com\/spectrum\/community\/SC\/forum\/\d+\/thread\//iu.test(link);
 
     if (!key || !title || (!patchUrl && !(patchTitle && patchContextLink)) || seen.has(key)) {
@@ -1269,6 +1270,10 @@ function getNextTrack() {
   return { filePath: shuffleQueue.shift(), requestedBy: null };
 }
 
+function isVoiceConnectionReady() {
+  return Boolean(connection && connection.state?.status === VoiceConnectionStatus.Ready);
+}
+
 function playTrack(trackInfo) {
   currentTrack = trackInfo.filePath;
   currentRequestedBy = trackInfo.requestedBy || null;
@@ -1466,7 +1471,7 @@ function buildSystemHeartbeatServices(client) {
         statusNote: botHealthy ? `Discord client ready as ${client.user?.tag || 'unknown bot'}.` : 'Discord client is not ready.',
         details: {
           uptimeSeconds: Math.round(process.uptime()),
-          voiceChannelId,
+          voiceChannelId: connection?.joinConfig?.channelId || null,
           currentTrack: currentTrack ? displayName(currentTrack) : null,
           lastSystemHeartbeatAt,
           lastSystemHeartbeatError: lastSystemHeartbeatError || null,
@@ -2077,7 +2082,8 @@ function formatVoiceStatus() {
   }
 
   if (connectionStatus === VoiceConnectionStatus.Ready) {
-    return `Connected to <#${voiceChannelId}>`;
+    const connectedChannelId = connection.joinConfig?.channelId;
+    return connectedChannelId ? `Connected to <#${connectedChannelId}>` : 'Connected';
   }
 
   return `Connecting (${connectionStatus})`;
@@ -2248,6 +2254,16 @@ function appendLimitedItems(lines, itemLines, overflowBuilder, maxLength = 1800)
       }
     }
   }
+}
+
+async function getInteractionVoiceChannel(interaction) {
+  const fallbackMember = interaction.member;
+  const member = fallbackMember?.voice
+    ? fallbackMember
+    : await interaction.guild.members.fetch(interaction.user.id);
+
+  const voiceChannel = member?.voice?.channel || null;
+  return voiceChannel && voiceChannel.isVoiceBased() ? voiceChannel : null;
 }
 
 function formatMemberShipsMessage(member) {
@@ -2806,11 +2822,9 @@ function formatAuthCheckMessage(payload, targetUser, guild) {
   return lines.join('\n');
 }
 
-async function connectToVoiceChannel(client) {
-  const channel = await client.channels.fetch(voiceChannelId);
-
+async function connectToVoiceChannel(channel) {
   if (!channel || !channel.isVoiceBased()) {
-    throw new Error('AFK_VOICE_CHANNEL_ID is not a valid voice channel.');
+    throw new Error('The selected channel is not a valid voice channel.');
   }
 
   if (connection) {
@@ -2850,6 +2864,9 @@ async function connectToVoiceChannel(client) {
 
 player.on(AudioPlayerStatus.Idle, () => {
   try {
+    if (!isVoiceConnectionReady()) {
+      return;
+    }
     playNext();
   } catch (error) {
     console.error('Playlist error:', error.message);
@@ -2861,6 +2878,12 @@ player.on('error', (error) => {
 });
 
 const commands = [
+  new SlashCommandBuilder()
+    .setName('play')
+    .setDescription('Join your voice channel and start radio shuffle.'),
+  new SlashCommandBuilder()
+    .setName('stop')
+    .setDescription('Stop playback and disconnect from voice.'),
   new SlashCommandBuilder()
     .setName('nowplaying')
     .setDescription('Show the current track.'),
@@ -3141,21 +3164,6 @@ client.once(Events.ClientReady, async (readyClient) => {
   }
 
   try {
-    await connectToVoiceChannel(readyClient);
-
-    if (shuffleQueue.length === 0) {
-      refillShuffleQueue();
-    }
-
-    if (
-      player.state.status !== AudioPlayerStatus.Playing &&
-      player.state.status !== AudioPlayerStatus.Buffering
-    ) {
-      playNext();
-    }
-
-    console.log('Voice connection ready.');
-
     await startRsiCommLinkWatcher(readyClient);
     console.log('RSI Comm-Link watcher ready.');
     await startRsiStatusWatcher(readyClient);
@@ -3184,7 +3192,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const staffOnlyCommands = new Set(['botstatus', 'setopstate', 'setoptime', 'forceopreminder', 'repostop', 'setrank']);
   const adminOnlyCommands = new Set(['adminqueue', 'authcheck', 'memberlookup', 'removed', 'botrestart', 'partykey']);
   const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
-  const memberChannelCommands = new Set(['nowplaying', 'skip', 'queue', 'library', 'request', 'roll', 'ships', 'fleet', 'roster']);
+  const memberChannelCommands = new Set(['play', 'stop', 'nowplaying', 'skip', 'queue', 'library', 'request', 'roll', 'ships', 'fleet', 'roster']);
 
   if (interaction.isAutocomplete()) {
     const fleetAutocompleteAllowed =
@@ -3261,7 +3269,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
-  const ephemeralCommands = new Set(['nowplaying', 'skip', 'queue', 'library', 'request', 'ships', 'fleet', 'roster', 'adminqueue', 'authcheck', 'memberlookup', 'removed', 'botstatus', 'botrestart', 'setrank', 'partykey']);
+  const ephemeralCommands = new Set(['play', 'stop', 'nowplaying', 'skip', 'queue', 'library', 'request', 'ships', 'fleet', 'roster', 'adminqueue', 'authcheck', 'memberlookup', 'removed', 'botstatus', 'botrestart', 'setrank', 'partykey']);
 
   if (!interaction.inGuild() || interaction.guildId !== guildId) {
     await interaction.reply({
@@ -3301,6 +3309,71 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
       return;
     }
+    if (interaction.commandName === 'play') {
+      const memberVoiceChannel = await getInteractionVoiceChannel(interaction);
+
+      if (!memberVoiceChannel) {
+        await interaction.reply({
+          content: 'Join a voice channel first, then run `/play`.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await connectToVoiceChannel(memberVoiceChannel);
+
+      if (shuffleQueue.length === 0) {
+        refillShuffleQueue();
+      }
+
+      const alreadyPlaying =
+        player.state.status === AudioPlayerStatus.Playing ||
+        player.state.status === AudioPlayerStatus.Buffering;
+
+      if (!alreadyPlaying) {
+        playNext();
+      }
+
+      const nowPlayingText = currentTrack
+        ? `Now playing: **${displayName(currentTrack)}**`
+        : 'Playback is ready.';
+
+      await interaction.reply({
+        content: `Joined <#${memberVoiceChannel.id}>. ${nowPlayingText}`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (interaction.commandName === 'stop') {
+      if (!connection) {
+        await interaction.reply({
+          content: 'Already disconnected.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      try {
+        player.stop(true);
+      } catch {}
+
+      currentTrack = null;
+      currentRequestedBy = null;
+
+      try {
+        connection.destroy();
+      } catch {}
+
+      connection = null;
+
+      await interaction.reply({
+        content: 'Stopped playback and disconnected from voice.',
+        ephemeral: true,
+      });
+      return;
+    }
+
     if (interaction.commandName === 'nowplaying') {
       const text = currentTrack
         ? currentRequestedBy
