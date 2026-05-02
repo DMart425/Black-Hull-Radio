@@ -64,7 +64,7 @@ const partyKeyOwnerUserId = (process.env.PARTY_KEY_OWNER_USER_ID || process.env.
 const staffOnlyCommands = new Set(['ops', 'system', 'memberadmin']);
 const adminOnlyCommands = new Set(['partykey']);
 const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
-const memberChannelCommands = new Set(['radio', 'roll', 'member', 'fleet']);
+const memberChannelCommands = new Set(['radio', 'roll', 'fleet']);
 
 if (!token || !guildId) {
   console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
@@ -3098,20 +3098,6 @@ const commandBuilders = [
         )
     ),
   new SlashCommandBuilder()
-    .setName('member')
-    .setDescription('Member lookup commands.')
-    .addSubcommand((sub) =>
-      sub
-        .setName('ships')
-        .setDescription("Show a member's ships from My File.")
-        .addUserOption((option) =>
-          option
-            .setName('member')
-            .setDescription('Member to inspect')
-            .setRequired(true)
-        )
-    ),
-  new SlashCommandBuilder()
     .setName('memberadmin')
     .setDescription('Staff/Admin member administration commands.')
     .addSubcommand((sub) =>
@@ -3175,6 +3161,17 @@ const commandBuilders = [
   new SlashCommandBuilder()
     .setName('fleet')
     .setDescription('Fleet and roster views.')
+    .addSubcommand((sub) =>
+      sub
+        .setName('ships')
+        .setDescription("Show a member's ships from My File.")
+        .addUserOption((option) =>
+          option
+            .setName('member')
+            .setDescription('Member to inspect')
+            .setRequired(true)
+        )
+    )
     .addSubcommand((sub) =>
       sub
         .setName('summary')
@@ -3401,7 +3398,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
-  const ephemeralCommands = new Set(['radio', 'member', 'memberadmin', 'fleet', 'system', 'partykey']);
+  const ephemeralCommands = new Set(['radio', 'memberadmin', 'fleet', 'system', 'partykey']);
 
   if (!interaction.inGuild() || interaction.guildId !== guildId) {
     await interaction.reply({
@@ -3741,18 +3738,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    if (interaction.commandName === 'member') {
-      await interaction.deferReply({ ephemeral: true });
-      const action = interaction.options.getSubcommand();
-
-      if (action === 'ships') {
-        const member = interaction.options.getUser('member', true);
-        const payload = await fetchMemberShips(member.id);
-        await interaction.editReply(formatMemberShipsMessage(payload.member));
-        return;
-      }
-    }
-
     if (interaction.commandName === 'memberadmin') {
       const action = interaction.options.getSubcommand();
       const adminOnlyActions = new Set(['authcheck', 'lookup', 'removed']);
@@ -3829,6 +3814,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.commandName === 'fleet') {
       await interaction.deferReply({ ephemeral: true });
       const action = interaction.options.getSubcommand();
+
+      if (action === 'ships') {
+        const member = interaction.options.getUser('member', true);
+        const payload = await fetchMemberShips(member.id);
+        await interaction.editReply(formatMemberShipsMessage(payload.member));
+        return;
+      }
 
       if (action === 'summary') {
         const payload = await fetchFleetSummary();
