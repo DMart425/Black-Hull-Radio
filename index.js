@@ -64,7 +64,7 @@ const partyKeyOwnerUserId = (process.env.PARTY_KEY_OWNER_USER_ID || process.env.
 const staffOnlyCommands = new Set(['botstatus', 'setopstate', 'setoptime', 'forceopreminder', 'repostop', 'setrank']);
 const adminOnlyCommands = new Set(['adminqueue', 'authcheck', 'memberlookup', 'removed', 'botrestart', 'partykey']);
 const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
-const memberChannelCommands = new Set(['play', 'stop', 'nowplaying', 'skip', 'queue', 'library', 'request', 'roll', 'ships', 'fleet', 'roster']);
+const memberChannelCommands = new Set(['radio', 'nowplaying', 'skip', 'queue', 'library', 'request', 'roll', 'ships', 'fleet', 'roster']);
 
 if (!token || !guildId) {
   console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
@@ -2920,11 +2920,18 @@ player.on('error', (error) => {
 
 const commandBuilders = [
   new SlashCommandBuilder()
-    .setName('play')
-    .setDescription('Join your voice channel and start radio shuffle.'),
-  new SlashCommandBuilder()
-    .setName('stop')
-    .setDescription('Stop playback and disconnect from voice.'),
+    .setName('radio')
+    .setDescription('Control radio playback in your current voice channel.')
+    .addSubcommand((sub) =>
+      sub
+        .setName('play')
+        .setDescription('Join your voice channel and start radio shuffle.')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('stop')
+        .setDescription('Stop playback and disconnect from voice.')
+    ),
   new SlashCommandBuilder()
     .setName('nowplaying')
     .setDescription('Show the current track.'),
@@ -3325,7 +3332,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
-  const ephemeralCommands = new Set(['play', 'stop', 'nowplaying', 'skip', 'queue', 'library', 'request', 'ships', 'fleet', 'roster', 'adminqueue', 'authcheck', 'memberlookup', 'removed', 'botstatus', 'botrestart', 'setrank', 'partykey']);
+  const ephemeralCommands = new Set(['radio', 'nowplaying', 'skip', 'queue', 'library', 'request', 'ships', 'fleet', 'roster', 'adminqueue', 'authcheck', 'memberlookup', 'removed', 'botstatus', 'botrestart', 'setrank', 'partykey']);
 
   if (!interaction.inGuild() || interaction.guildId !== guildId) {
     await interaction.reply({
@@ -3365,87 +3372,91 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
       return;
     }
-    if (interaction.commandName === 'play') {
-      const memberVoiceChannel = await getInteractionVoiceChannel(interaction);
+    if (interaction.commandName === 'radio') {
+      const action = interaction.options.getSubcommand();
 
-      if (!memberVoiceChannel) {
+      if (action === 'play') {
+        const memberVoiceChannel = await getInteractionVoiceChannel(interaction);
+
+        if (!memberVoiceChannel) {
+          await interaction.reply({
+            content: 'Join a voice channel first, then run /radio play.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe();
+        const missingPermissions = getMissingVoicePermissions(memberVoiceChannel, botMember);
+
+        if (missingPermissions.length > 0) {
+          await interaction.reply({
+            content: `I cannot join <#${memberVoiceChannel.id}>. Missing permissions: ${missingPermissions.join(', ')}`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        if (!isVoiceConnectionReady() && (
+          player.state.status === AudioPlayerStatus.Playing
+          || player.state.status === AudioPlayerStatus.Buffering
+          || player.state.status === AudioPlayerStatus.Paused
+        )) {
+          disconnectFromVoice(interaction.guildId);
+        }
+
+        try {
+          await connectToVoiceChannel(memberVoiceChannel);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error || 'Unknown voice error.');
+          await interaction.reply({
+            content: `I could not join <#${memberVoiceChannel.id}>. ${truncateText(message, 140)}`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        if (shuffleQueue.length === 0) {
+          refillShuffleQueue();
+        }
+
+        const alreadyPlaying =
+          player.state.status === AudioPlayerStatus.Playing ||
+          player.state.status === AudioPlayerStatus.Buffering;
+
+        if (!alreadyPlaying) {
+          playNext();
+        }
+
+        const nowPlayingText = currentTrack
+          ? `Now playing: **${displayName(currentTrack)}**`
+          : 'Playback is ready.';
+
         await interaction.reply({
-          content: 'Join a voice channel first, then run `/play`.',
+          content: `Joined <#${memberVoiceChannel.id}>. ${nowPlayingText}`,
           ephemeral: true,
         });
         return;
       }
 
-      const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe();
-      const missingPermissions = getMissingVoicePermissions(memberVoiceChannel, botMember);
+      if (action === 'stop') {
+        const activeConnection = getVoiceConnection(interaction.guildId) || connection;
+        if (!activeConnection) {
+          await interaction.reply({
+            content: 'Already disconnected.',
+            ephemeral: true,
+          });
+          return;
+        }
 
-      if (missingPermissions.length > 0) {
-        await interaction.reply({
-          content: `I cannot join <#${memberVoiceChannel.id}>. Missing permissions: ${missingPermissions.join(', ')}`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (!isVoiceConnectionReady() && (
-        player.state.status === AudioPlayerStatus.Playing
-        || player.state.status === AudioPlayerStatus.Buffering
-        || player.state.status === AudioPlayerStatus.Paused
-      )) {
         disconnectFromVoice(interaction.guildId);
-      }
 
-      try {
-        await connectToVoiceChannel(memberVoiceChannel);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error || 'Unknown voice error.');
         await interaction.reply({
-          content: `I could not join <#${memberVoiceChannel.id}>. ${truncateText(message, 140)}`,
+          content: 'Stopped playback and disconnected from voice.',
           ephemeral: true,
         });
         return;
       }
-
-      if (shuffleQueue.length === 0) {
-        refillShuffleQueue();
-      }
-
-      const alreadyPlaying =
-        player.state.status === AudioPlayerStatus.Playing ||
-        player.state.status === AudioPlayerStatus.Buffering;
-
-      if (!alreadyPlaying) {
-        playNext();
-      }
-
-      const nowPlayingText = currentTrack
-        ? `Now playing: **${displayName(currentTrack)}**`
-        : 'Playback is ready.';
-
-      await interaction.reply({
-        content: `Joined <#${memberVoiceChannel.id}>. ${nowPlayingText}`,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (interaction.commandName === 'stop') {
-      const activeConnection = getVoiceConnection(interaction.guildId) || connection;
-      if (!activeConnection) {
-        await interaction.reply({
-          content: 'Already disconnected.',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      disconnectFromVoice(interaction.guildId);
-
-      await interaction.reply({
-        content: 'Stopped playback and disconnected from voice.',
-        ephemeral: true,
-      });
-      return;
     }
 
     if (interaction.commandName === 'nowplaying') {
