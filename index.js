@@ -12,6 +12,7 @@ const {
   Routes,
   SlashCommandBuilder,
   EmbedBuilder,
+  PermissionsBitField,
 } = require('discord.js');
 const {
   joinVoiceChannel,
@@ -2286,6 +2287,21 @@ async function getInteractionVoiceChannel(interaction) {
   return voiceChannel && voiceChannel.isVoiceBased() ? voiceChannel : null;
 }
 
+function getMissingVoicePermissions(channel, member) {
+  const requiredPermissions = [
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.Connect,
+    PermissionsBitField.Flags.Speak,
+  ];
+
+  const permissions = channel?.permissionsFor(member);
+  if (!permissions) {
+    return requiredPermissions;
+  }
+
+  return permissions.missing(requiredPermissions);
+}
+
 function formatMemberShipsMessage(member) {
   const display = cleanText(member?.displayName) || 'Unknown Member';
   const rsiName = cleanText(member?.rsiName);
@@ -3340,7 +3356,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      await connectToVoiceChannel(memberVoiceChannel);
+      const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe();
+      const missingPermissions = getMissingVoicePermissions(memberVoiceChannel, botMember);
+
+      if (missingPermissions.length > 0) {
+        await interaction.reply({
+          content: `I cannot join <#${memberVoiceChannel.id}>. Missing permissions: ${missingPermissions.join(', ')}`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      try {
+        await connectToVoiceChannel(memberVoiceChannel);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || 'Unknown voice error.');
+        await interaction.reply({
+          content: `I could not join <#${memberVoiceChannel.id}>. ${truncateText(message, 140)}`,
+          ephemeral: true,
+        });
+        return;
+      }
 
       if (shuffleQueue.length === 0) {
         refillShuffleQueue();
