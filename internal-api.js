@@ -362,6 +362,20 @@ function startInternalApi({ port, client, handlers = {} }) {
       }
 
       const key = handlers.generatePartyKey(userId);
+
+      // DM the member their key (best-effort — don't fail the request if DMs are closed)
+      if (client) {
+        client.users.fetch(userId).then((user) => user.send(
+          `**Black Hull SnareHound — Party API Key**\n` +
+          `Your personal key has been generated (or replaced) by a Chief via the dashboard.\n\n` +
+          `\`\`\`\n${key}\n\`\`\`\n` +
+          `Enter this in the SnareHound Party System settings along with the bot URL.\n` +
+          `Keep this private — do not share it.`
+        )).catch((dmErr) => {
+          console.warn('[internal-api] party-key DM failed for', userId, dmErr.message);
+        });
+      }
+
       return res.json({ ok: true, key });
     } catch (error) {
       console.error('[internal-api] party-keys generate failure:', error);

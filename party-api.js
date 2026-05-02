@@ -306,7 +306,7 @@ function hasKey(discordUserId) {
 function listKeys() {
   return Array.from(partyKeys.entries()).map(([discordUserId, key]) => ({
     discordUserId,
-    keyPrefix: key.slice(0, 20) + '…',
+    key,
     hasActiveSession: partyState.has(discordUserId),
   }));
 }
