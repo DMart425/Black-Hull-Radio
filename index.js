@@ -64,7 +64,7 @@ const partyKeyOwnerUserId = (process.env.PARTY_KEY_OWNER_USER_ID || process.env.
 const staffOnlyCommands = new Set(['botstatus', 'setopstate', 'setoptime', 'forceopreminder', 'repostop', 'setrank']);
 const adminOnlyCommands = new Set(['adminqueue', 'authcheck', 'memberlookup', 'removed', 'botrestart', 'partykey']);
 const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
-const memberChannelCommands = new Set(['radio', 'nowplaying', 'skip', 'queue', 'library', 'request', 'roll', 'ships', 'fleet', 'roster']);
+const memberChannelCommands = new Set(['radio', 'roll', 'ships', 'fleet', 'roster']);
 
 if (!token || !guildId) {
   console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
@@ -2931,33 +2931,43 @@ const commandBuilders = [
       sub
         .setName('stop')
         .setDescription('Stop playback and disconnect from voice.')
-    ),
-  new SlashCommandBuilder()
-    .setName('nowplaying')
-    .setDescription('Show the current track.'),
-  new SlashCommandBuilder()
-    .setName('skip')
-    .setDescription('Skip the current track.'),
-  new SlashCommandBuilder()
-    .setName('queue')
-    .setDescription('Show the next 5 tracks.'),
-  new SlashCommandBuilder()
-    .setName('library')
-    .setDescription('Browse the radio library.')
-    .addIntegerOption((option) =>
-      option.setName('page').setDescription('Library page number').setMinValue(1)
     )
-    .addStringOption((option) =>
-      option.setName('search').setDescription('Search by track name')
-    ),
-  new SlashCommandBuilder()
-    .setName('request')
-    .setDescription('Queue a track from the local library to play next.')
-    .addStringOption((option) =>
-      option
-        .setName('track')
-        .setDescription('Track name to request')
-        .setRequired(true)
+    .addSubcommand((sub) =>
+      sub
+        .setName('nowplaying')
+        .setDescription('Show the current track.')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('skip')
+        .setDescription('Skip the current track.')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('queue')
+        .setDescription('Show the next 5 tracks.')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('library')
+        .setDescription('Browse the radio library.')
+        .addIntegerOption((option) =>
+          option.setName('page').setDescription('Library page number').setMinValue(1)
+        )
+        .addStringOption((option) =>
+          option.setName('search').setDescription('Search by track name')
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('request')
+        .setDescription('Queue a track from the local library to play next.')
+        .addStringOption((option) =>
+          option
+            .setName('track')
+            .setDescription('Track name to request')
+            .setRequired(true)
+        )
     ),
   buildRollCommand(),
   new SlashCommandBuilder()
@@ -3332,7 +3342,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
-  const ephemeralCommands = new Set(['radio', 'nowplaying', 'skip', 'queue', 'library', 'request', 'ships', 'fleet', 'roster', 'adminqueue', 'authcheck', 'memberlookup', 'removed', 'botstatus', 'botrestart', 'setrank', 'partykey']);
+  const ephemeralCommands = new Set(['radio', 'ships', 'fleet', 'roster', 'adminqueue', 'authcheck', 'memberlookup', 'removed', 'botstatus', 'botrestart', 'setrank', 'partykey']);
 
   if (!interaction.inGuild() || interaction.guildId !== guildId) {
     await interaction.reply({
@@ -3457,112 +3467,117 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         return;
       }
-    }
+      if (action === 'nowplaying') {
+        const text = currentTrack
+          ? currentRequestedBy
+            ? `Now playing: **${displayName(currentTrack)}** (requested by ${currentRequestedBy})`
+            : `Now playing: **${displayName(currentTrack)}**`
+          : 'Nothing is playing right now.';
 
-    if (interaction.commandName === 'nowplaying') {
-      const text = currentTrack
-        ? currentRequestedBy
-          ? `Now playing: **${displayName(currentTrack)}** (requested by ${currentRequestedBy})`
-          : `Now playing: **${displayName(currentTrack)}**`
-        : 'Nothing is playing right now.';
-
-      await interaction.reply({ content: text, ephemeral: true });
-      return;
-    }
-
-    if (interaction.commandName === 'skip') {
-      if (!currentTrack) {
-        await interaction.reply({ content: 'Nothing is playing right now.', ephemeral: true });
+        await interaction.reply({ content: text, ephemeral: true });
         return;
       }
 
-      playNext();
-      await interaction.reply({
-        content: `Skipped. Now playing: **${displayName(currentTrack)}**`,
-        ephemeral: true,
-      });
-      return;
-    }
+      if (action === 'skip') {
+        if (!currentTrack) {
+          await interaction.reply({ content: 'Nothing is playing right now.', ephemeral: true });
+          return;
+        }
 
-    if (interaction.commandName === 'queue') {
-      const upcoming = buildPreviewQueue(5);
-      const text = upcoming.length
-        ? upcoming.map((track, index) => `${index + 1}. ${displayName(track)}`).join('\n')
-        : 'No upcoming tracks found.';
-
-      await interaction.reply({
-        content: `**Next 5 tracks**\n${text}`,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (interaction.commandName === 'library') {
-      const pageSize = 10;
-      const page = interaction.options.getInteger('page') || 1;
-      const search = (interaction.options.getString('search') || '').trim().toLowerCase();
-
-      let library = readLibrary();
-      if (search) {
-        library = library.filter((track) => displayName(track).toLowerCase().includes(search));
-      }
-
-      if (library.length === 0) {
+        playNext();
         await interaction.reply({
-          content: search ? `No tracks found for **${search}**.` : 'The library is empty.',
+          content: `Skipped. Now playing: **${displayName(currentTrack)}**`,
           ephemeral: true,
         });
         return;
       }
 
-      const totalPages = Math.max(1, Math.ceil(library.length / pageSize));
-      const safePage = Math.min(page, totalPages);
-      const start = (safePage - 1) * pageSize;
-      const pageItems = library.slice(start, start + pageSize);
+      if (action === 'queue') {
+        const upcoming = buildPreviewQueue(5);
+        const text = upcoming.length
+          ? upcoming.map((track, index) => `${index + 1}. ${displayName(track)}`).join('\n')
+          : 'No upcoming tracks found.';
 
-      const body = pageItems
-        .map((track, index) => `${start + index + 1}. ${displayName(track)}`)
-        .join('\n');
+        await interaction.reply({
+          content: `**Next 5 tracks**\n${text}`,
+          ephemeral: true,
+        });
+        return;
+      }
 
-      const heading = search
-        ? `**Library search: ${search} — Page ${safePage} of ${totalPages}**`
-        : `**Library — Page ${safePage} of ${totalPages}**`;
+      if (action === 'library') {
+        const pageSize = 10;
+        const page = interaction.options.getInteger('page') || 1;
+        const search = (interaction.options.getString('search') || '').trim().toLowerCase();
 
-      await interaction.reply({
-        content: `${heading}\n${body}`,
-        ephemeral: true,
-      });
-      return;
-    }
+        let library = readLibrary();
+        if (search) {
+          library = library.filter((track) => displayName(track).toLowerCase().includes(search));
+        }
 
-    if (interaction.commandName === 'request') {
-      const query = interaction.options.getString('track', true);
-      const result = matchTrack(query);
-
-      if (!result.match) {
-        if (result.suggestions.length > 0) {
-          const suggestions = result.suggestions
-            .map((track, index) => `${index + 1}. ${displayName(track)}`)
-            .join('\n');
-
+        if (library.length === 0) {
           await interaction.reply({
-            content: `More than one track matched **${query}**. Try one of these:\n${suggestions}`,
+            content: search ? `No tracks found for **${search}**.` : 'The library is empty.',
             ephemeral: true,
           });
           return;
         }
 
+        const totalPages = Math.max(1, Math.ceil(library.length / pageSize));
+        const safePage = Math.min(page, totalPages);
+        const start = (safePage - 1) * pageSize;
+        const pageItems = library.slice(start, start + pageSize);
+
+        const body = pageItems
+          .map((track, index) => `${start + index + 1}. ${displayName(track)}`)
+          .join('\n');
+
+        const heading = search
+          ? `**Library search: ${search} — Page ${safePage} of ${totalPages}**`
+          : `**Library — Page ${safePage} of ${totalPages}**`;
+
         await interaction.reply({
-          content: `No track matched **${query}**.`,
+          content: `${heading}\n${body}`,
           ephemeral: true,
         });
         return;
       }
 
-      requestQueue.unshift(result.match);
+      if (action === 'request') {
+        const query = interaction.options.getString('track', true);
+        const result = matchTrack(query);
+
+        if (!result.match) {
+          if (result.suggestions.length > 0) {
+            const suggestions = result.suggestions
+              .map((track, index) => `${index + 1}. ${displayName(track)}`)
+              .join('\n');
+
+            await interaction.reply({
+              content: `More than one track matched **${query}**. Try one of these:\n${suggestions}`,
+              ephemeral: true,
+            });
+            return;
+          }
+
+          await interaction.reply({
+            content: `No track matched **${query}**.`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        requestQueue.unshift(result.match);
+
+        await interaction.reply({
+          content: `Queued next: **${displayName(result.match)}**`,
+          ephemeral: true,
+        });
+        return;
+      }
 
       await interaction.reply({
-        content: `Queued next: **${displayName(result.match)}**`,
+        content: 'Unknown radio action.',
         ephemeral: true,
       });
       return;
