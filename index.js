@@ -3987,6 +3987,7 @@ startInternalApi({
     runSystemHeartbeat: () => runSystemHeartbeatRecoveryAction(client),
     runOpsReminderPoll: () => runOpsReminderPollRecoveryAction(client),
     listPartyKeys: () => listKeys(),
+    generatePartyKey: (userId) => generateKeyForUser(userId),
     revokePartyKey: (userId) => revokeKeyForUser(userId),
   },
 });

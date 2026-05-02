@@ -347,6 +347,28 @@ function startInternalApi({ port, client, handlers = {} }) {
     }
   });
 
+  app.post('/internal/party-keys', (req, res) => {
+    try {
+      const auth = req.headers.authorization || '';
+      if (!sharedSecret || auth !== `Bearer ${sharedSecret}`) {
+        return jsonError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+      }
+
+      const userId = clean((req.body || {}).userId);
+      if (!userId) return jsonError(res, 400, 'Missing userId', 'BAD_REQUEST');
+
+      if (typeof handlers.generatePartyKey !== 'function') {
+        return jsonError(res, 501, 'Party key handler not available', 'HANDLER_MISSING');
+      }
+
+      const key = handlers.generatePartyKey(userId);
+      return res.json({ ok: true, key });
+    } catch (error) {
+      console.error('[internal-api] party-keys generate failure:', error);
+      return jsonError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
+    }
+  });
+
   app.delete('/internal/party-keys/:userId', (req, res) => {
     try {
       const auth = req.headers.authorization || '';
