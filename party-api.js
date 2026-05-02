@@ -303,4 +303,12 @@ function hasKey(discordUserId) {
   return partyKeys.has(discordUserId);
 }
 
-module.exports = { startPartyApi, generateKeyForUser, revokeKeyForUser, revokeAllKeys, hasKey };
+function listKeys() {
+  return Array.from(partyKeys.entries()).map(([discordUserId, key]) => ({
+    discordUserId,
+    keyPrefix: key.slice(0, 20) + '…',
+    hasActiveSession: partyState.has(discordUserId),
+  }));
+}
+
+module.exports = { startPartyApi, generateKeyForUser, revokeKeyForUser, revokeAllKeys, hasKey, listKeys };

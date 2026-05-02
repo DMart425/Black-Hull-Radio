@@ -327,6 +327,48 @@ function startInternalApi({ port, client, handlers = {} }) {
     }
   });
 
+  // ── Party key management (chief dashboard) ──────────────────────────────
+  app.get('/internal/party-keys', (req, res) => {
+    try {
+      const auth = req.headers.authorization || '';
+      if (!sharedSecret || auth !== `Bearer ${sharedSecret}`) {
+        return jsonError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+      }
+
+      if (typeof handlers.listPartyKeys !== 'function') {
+        return jsonError(res, 501, 'Party key handler not available', 'HANDLER_MISSING');
+      }
+
+      const keys = handlers.listPartyKeys();
+      return res.json({ ok: true, keys });
+    } catch (error) {
+      console.error('[internal-api] party-keys list failure:', error);
+      return jsonError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
+    }
+  });
+
+  app.delete('/internal/party-keys/:userId', (req, res) => {
+    try {
+      const auth = req.headers.authorization || '';
+      if (!sharedSecret || auth !== `Bearer ${sharedSecret}`) {
+        return jsonError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+      }
+
+      const userId = clean(req.params.userId);
+      if (!userId) return jsonError(res, 400, 'Missing userId', 'BAD_REQUEST');
+
+      if (typeof handlers.revokePartyKey !== 'function') {
+        return jsonError(res, 501, 'Party key handler not available', 'HANDLER_MISSING');
+      }
+
+      const revoked = handlers.revokePartyKey(userId);
+      return res.json({ ok: true, revoked });
+    } catch (error) {
+      console.error('[internal-api] party-keys revoke failure:', error);
+      return jsonError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
+    }
+  });
+
   app.listen(port, '0.0.0.0', () => {
     console.log(`[internal-api] listening on port ${port}`);
   });

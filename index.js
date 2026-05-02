@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { startInternalApi } = require('./internal-api');
-const { startPartyApi, generateKeyForUser, revokeKeyForUser, revokeAllKeys } = require('./party-api');
+const { startPartyApi, generateKeyForUser, revokeKeyForUser, revokeAllKeys, listKeys } = require('./party-api');
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -3981,6 +3981,8 @@ startInternalApi({
   handlers: {
     runSystemHeartbeat: () => runSystemHeartbeatRecoveryAction(client),
     runOpsReminderPoll: () => runOpsReminderPollRecoveryAction(client),
+    listPartyKeys: () => listKeys(),
+    revokePartyKey: (userId) => revokeKeyForUser(userId),
   },
 });
 internalApiStartedAt = new Date().toISOString();
