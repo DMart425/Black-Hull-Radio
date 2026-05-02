@@ -61,10 +61,10 @@ const officerRoleIds = (process.env.DISCORD_OFFICER_ROLE_IDS || '').split(',').m
 const staffRoleIds = [...new Set([...adminRoleIds, ...officerRoleIds])];
 const partyApiPort = Math.max(1024, Number(process.env.PARTY_API_PORT || '3002'));
 const partyKeyOwnerUserId = (process.env.PARTY_KEY_OWNER_USER_ID || process.env.BOT_OWNER_USER_ID || '').trim();
-const staffOnlyCommands = new Set(['botstatus', 'setopstate', 'setoptime', 'forceopreminder', 'repostop', 'setrank']);
-const adminOnlyCommands = new Set(['adminqueue', 'authcheck', 'memberlookup', 'removed', 'botrestart', 'partykey']);
+const staffOnlyCommands = new Set(['ops', 'system', 'memberadmin']);
+const adminOnlyCommands = new Set(['partykey']);
 const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
-const memberChannelCommands = new Set(['radio', 'roll', 'ships', 'fleet', 'roster']);
+const memberChannelCommands = new Set(['radio', 'roll', 'member', 'fleet']);
 
 if (!token || !guildId) {
   console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
@@ -2349,7 +2349,7 @@ function formatFleetSummaryMessage(payload) {
     return lines.join('\n');
   }
 
-  lines.push('Use `/fleet ship:<name>` to see owners for one hull.');
+  lines.push('Use `/fleet ship` to see owners for one hull.');
   lines.push('');
 
   const shipLines = ships.map((ship, index) => {
@@ -2370,7 +2370,7 @@ function formatFleetShipDetailMessage(payload, requestedShip) {
   const query = cleanText(payload?.query) || cleanText(requestedShip);
 
   if (matchType === 'none') {
-    return `No fleet match found for **${query}**. Start typing in \`/fleet ship:\` and pick a suggestion.`;
+    return `No fleet match found for **${query}**. Start typing in \`/fleet ship\` and pick a suggestion.`;
   }
 
   if (matchType === 'multiple') {
@@ -2391,7 +2391,7 @@ function formatFleetShipDetailMessage(payload, requestedShip) {
 
   const ship = payload?.ship;
   if (!ship) {
-    return `No fleet match found for **${query}**. Start typing in \`/fleet ship:\` and pick a suggestion.`;
+    return `No fleet match found for **${query}**. Start typing in \`/fleet ship\` and pick a suggestion.`;
   }
 
   const owners = Array.isArray(ship?.owners) ? ship.owners : [];
@@ -2467,7 +2467,7 @@ function formatRosterMessage(payload, requestedStatus) {
     `Active on file: **${activeCount}**`,
     `Inactive on file: **${inactiveCount}**`,
     'Removed members are excluded.',
-    'Use `/roster status:active` or `/roster status:inactive` for one side only.',
+    'Use `/fleet roster status:active` or `/fleet roster status:inactive` for one side only.',
     '',
     ...formatRosterSectionLines('Active', active),
     '',
@@ -2806,7 +2806,7 @@ function formatRemovedMessage(payload, targetUser) {
   const lines = [
     '**Removed roster pool**',
     `Total on file: **${totalRemoved}**`,
-    'Use `/removed member:@user` to inspect one current Discord member directly.',
+    'Use `/memberadmin removed member:@user` to inspect one current Discord member directly.',
   ];
 
   if (!removedMembers.length) {
@@ -2971,207 +2971,266 @@ const commandBuilders = [
     ),
   buildRollCommand(),
   new SlashCommandBuilder()
-    .setName('setopstate')
-    .setDescription('Staff: change an operation state by BH code.')
-    .addStringOption((option) =>
-      option
-        .setName('code')
-        .setDescription('BH op code, like BH-0123')
-        .setRequired(true)
-        .setAutocomplete(true)
-    )
-    .addStringOption((option) =>
-      option
+    .setName('ops')
+    .setDescription('Staff: operation management commands.')
+    .addSubcommand((sub) =>
+      sub
         .setName('state')
-        .setDescription('New operation state')
-        .setRequired(true)
-        .addChoices(
-          { name: 'Planned', value: 'planned' },
-          { name: 'Active', value: 'active' },
-          { name: 'Completed', value: 'completed' },
-          { name: 'Cancelled', value: 'cancelled' },
+        .setDescription('Change an operation state by BH code.')
+        .addStringOption((option) =>
+          option
+            .setName('code')
+            .setDescription('BH op code, like BH-0123')
+            .setRequired(true)
+            .setAutocomplete(true)
+        )
+        .addStringOption((option) =>
+          option
+            .setName('state')
+            .setDescription('New operation state')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Planned', value: 'planned' },
+              { name: 'Active', value: 'active' },
+              { name: 'Completed', value: 'completed' },
+              { name: 'Cancelled', value: 'cancelled' },
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('time')
+        .setDescription('Change an operation start time by BH code using your profile timezone.')
+        .addStringOption((option) =>
+          option
+            .setName('code')
+            .setDescription('BH op code, like BH-0123')
+            .setRequired(true)
+            .setAutocomplete(true)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName('year')
+            .setDescription('Local calendar year')
+            .setRequired(true)
+            .setMinValue(2024)
+            .setMaxValue(2100)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName('month')
+            .setDescription('Local calendar month')
+            .setRequired(true)
+            .addChoices(
+              { name: 'January', value: 1 },
+              { name: 'February', value: 2 },
+              { name: 'March', value: 3 },
+              { name: 'April', value: 4 },
+              { name: 'May', value: 5 },
+              { name: 'June', value: 6 },
+              { name: 'July', value: 7 },
+              { name: 'August', value: 8 },
+              { name: 'September', value: 9 },
+              { name: 'October', value: 10 },
+              { name: 'November', value: 11 },
+              { name: 'December', value: 12 },
+            )
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName('day')
+            .setDescription('Local calendar day')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(31)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName('hour')
+            .setDescription('Local hour in 24-hour time')
+            .setRequired(true)
+            .setMinValue(0)
+            .setMaxValue(23)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName('minute')
+            .setDescription('Local minute')
+            .setRequired(true)
+            .setMinValue(0)
+            .setMaxValue(59)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('remind')
+        .setDescription('Post a manual ops reminder to Operations by BH code.')
+        .addStringOption((option) =>
+          option
+            .setName('code')
+            .setDescription('BH op code, like BH-0123')
+            .setRequired(true)
+            .setAutocomplete(true)
+        )
+        .addStringOption((option) =>
+          option
+            .setName('timing')
+            .setDescription('Reminder style to post')
+            .setRequired(true)
+            .addChoices(
+              { name: '24-hour reminder', value: '24h' },
+              { name: '1-hour reminder', value: '1h' },
+              { name: '15-minute reminder', value: '15m' },
+              { name: 'Manual push', value: 'now' },
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('repost')
+        .setDescription('Replace the tracked Discord op post with a fresh post by BH code.')
+        .addStringOption((option) =>
+          option
+            .setName('code')
+            .setDescription('BH op code, like BH-0123')
+            .setRequired(true)
+            .setAutocomplete(true)
         )
     ),
   new SlashCommandBuilder()
-    .setName('setoptime')
-    .setDescription('Staff: change an operation start time by BH code using your profile timezone.')
-    .addStringOption((option) =>
-      option
-        .setName('code')
-        .setDescription('BH op code, like BH-0123')
-        .setRequired(true)
-        .setAutocomplete(true)
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('year')
-        .setDescription('Local calendar year')
-        .setRequired(true)
-        .setMinValue(2024)
-        .setMaxValue(2100)
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('month')
-        .setDescription('Local calendar month')
-        .setRequired(true)
-        .addChoices(
-          { name: 'January', value: 1 },
-          { name: 'February', value: 2 },
-          { name: 'March', value: 3 },
-          { name: 'April', value: 4 },
-          { name: 'May', value: 5 },
-          { name: 'June', value: 6 },
-          { name: 'July', value: 7 },
-          { name: 'August', value: 8 },
-          { name: 'September', value: 9 },
-          { name: 'October', value: 10 },
-          { name: 'November', value: 11 },
-          { name: 'December', value: 12 },
-        )
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('day')
-        .setDescription('Local calendar day')
-        .setRequired(true)
-        .setMinValue(1)
-        .setMaxValue(31)
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('hour')
-        .setDescription('Local hour in 24-hour time')
-        .setRequired(true)
-        .setMinValue(0)
-        .setMaxValue(23)
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('minute')
-        .setDescription('Local minute')
-        .setRequired(true)
-        .setMinValue(0)
-        .setMaxValue(59)
-    ),
-  new SlashCommandBuilder()
-    .setName('forceopreminder')
-    .setDescription('Staff: post a manual ops reminder to Operations by BH code.')
-    .addStringOption((option) =>
-      option
-        .setName('code')
-        .setDescription('BH op code, like BH-0123')
-        .setRequired(true)
-        .setAutocomplete(true)
-    )
-    .addStringOption((option) =>
-      option
-        .setName('timing')
-        .setDescription('Reminder style to post')
-        .setRequired(true)
-        .addChoices(
-          { name: '24-hour reminder', value: '24h' },
-          { name: '1-hour reminder', value: '1h' },
-          { name: '15-minute reminder', value: '15m' },
-          { name: 'Manual push', value: 'now' },
+    .setName('member')
+    .setDescription('Member lookup commands.')
+    .addSubcommand((sub) =>
+      sub
+        .setName('ships')
+        .setDescription("Show a member's ships from My File.")
+        .addUserOption((option) =>
+          option
+            .setName('member')
+            .setDescription('Member to inspect')
+            .setRequired(true)
         )
     ),
   new SlashCommandBuilder()
-    .setName('repostop')
-    .setDescription('Staff: replace the tracked Discord op post with a fresh post by BH code.')
-    .addStringOption((option) =>
-      option
-        .setName('code')
-        .setDescription('BH op code, like BH-0123')
-        .setRequired(true)
-        .setAutocomplete(true)
-    ),
-  new SlashCommandBuilder()
-    .setName('setrank')
-    .setDescription('Staff: change a member website rank and sync non-Chief Discord roles, including Inactive.')
-    .addUserOption((option) =>
-      option
-        .setName('member')
-        .setDescription('Member to update')
-        .setRequired(true)
-    )
-    .addStringOption((option) =>
-      option
-        .setName('rank')
-        .setDescription('New org rank')
-        .setRequired(true)
-        .addChoices(
-          { name: 'Captain', value: 'Captain' },
-          { name: 'Enforcer', value: 'Enforcer' },
-          { name: 'Patched', value: 'Patched' },
-          { name: 'Soldier', value: 'Soldier' },
-          { name: 'Thug', value: 'Thug' },
-          { name: 'Inactive', value: 'Inactive' },
+    .setName('memberadmin')
+    .setDescription('Staff/Admin member administration commands.')
+    .addSubcommand((sub) =>
+      sub
+        .setName('setrank')
+        .setDescription('Change a member website rank and sync non-Chief Discord roles, including Inactive.')
+        .addUserOption((option) =>
+          option
+            .setName('member')
+            .setDescription('Member to update')
+            .setRequired(true)
         )
-    ),
-  new SlashCommandBuilder()
-    .setName('ships')
-    .setDescription("Show a member's ships from My File.")
-    .addUserOption((option) =>
-      option
-        .setName('member')
-        .setDescription('Member to inspect')
-        .setRequired(true)
+        .addStringOption((option) =>
+          option
+            .setName('rank')
+            .setDescription('New org rank')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Captain', value: 'Captain' },
+              { name: 'Enforcer', value: 'Enforcer' },
+              { name: 'Patched', value: 'Patched' },
+              { name: 'Soldier', value: 'Soldier' },
+              { name: 'Thug', value: 'Thug' },
+              { name: 'Inactive', value: 'Inactive' },
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('authcheck')
+        .setDescription('Check whether a member should pass website access.')
+        .addUserOption((option) =>
+          option
+            .setName('member')
+            .setDescription('Member to inspect')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('lookup')
+        .setDescription('Show the full staff member lookup for one member.')
+        .addUserOption((option) =>
+          option
+            .setName('member')
+            .setDescription('Member to inspect')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('removed')
+        .setDescription('Show the removed roster pool or inspect one member.')
+        .addUserOption((option) =>
+          option
+            .setName('member')
+            .setDescription('Optional current Discord member to inspect')
+            .setRequired(false)
+        )
     ),
   new SlashCommandBuilder()
     .setName('fleet')
-    .setDescription('Show the org fleet summary or owners for a specific hull.')
-    .addStringOption((option) =>
-      option
+    .setDescription('Fleet and roster views.')
+    .addSubcommand((sub) =>
+      sub
+        .setName('summary')
+        .setDescription('Show the org fleet summary.')
+    )
+    .addSubcommand((sub) =>
+      sub
         .setName('ship')
-        .setDescription('Specific ship to inspect')
-        .setAutocomplete(true)
-    ),
-  new SlashCommandBuilder()
-    .setName('roster')
-    .setDescription('Show the active and inactive roster from the website.')
-    .addStringOption((option) =>
-      option
-        .setName('status')
-        .setDescription('Optional roster section to show')
-        .addChoices(
-          { name: 'Active', value: 'active' },
-          { name: 'Inactive / Reserve', value: 'inactive' }
+        .setDescription('Show owners for a specific hull.')
+        .addStringOption((option) =>
+          option
+            .setName('ship')
+            .setDescription('Specific ship to inspect')
+            .setAutocomplete(true)
+            .setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('roster')
+        .setDescription('Show the active and inactive roster from the website.')
+        .addStringOption((option) =>
+          option
+            .setName('status')
+            .setDescription('Optional roster section to show')
+            .addChoices(
+              { name: 'Active', value: 'active' },
+              { name: 'Inactive / Reserve', value: 'inactive' }
+            )
         )
     ),
   new SlashCommandBuilder()
-    .setName('adminqueue')
-    .setDescription('Show the website attention queue for media, recruitment, and roster.'),
-  new SlashCommandBuilder()
-    .setName('authcheck')
-    .setDescription('Check whether a member should pass website access.')
-    .addUserOption((option) =>
-      option
-        .setName('member')
-        .setDescription('Member to inspect')
-        .setRequired(true)
+    .setName('system')
+    .setDescription('Staff/Admin system operations.')
+    .addSubcommand((sub) =>
+      sub
+        .setName('status')
+        .setDescription('Show the current health of Black Hull Broadcast.')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('queue')
+        .setDescription('Show the website attention queue for media, recruitment, and roster.')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('restart')
+        .setDescription('Restart Black Hull Broadcast through pm2.')
+        .addStringOption((option) =>
+          option
+            .setName('confirm')
+            .setDescription('Required confirmation value')
+            .setRequired(true)
+            .addChoices({ name: 'restart', value: 'restart' })
+        )
     ),
-  new SlashCommandBuilder()
-    .setName('memberlookup')
-    .setDescription('Show the full staff member lookup for one member.')
-    .addUserOption((option) =>
-      option
-        .setName('member')
-        .setDescription('Member to inspect')
-        .setRequired(true)
-    ),
-  new SlashCommandBuilder()
-    .setName('removed')
-    .setDescription('Show the removed roster pool or inspect one member.')
-    .addUserOption((option) =>
-      option
-        .setName('member')
-        .setDescription('Optional current Discord member to inspect')
-        .setRequired(false)
-    ),
-  new SlashCommandBuilder()
-    .setName('botstatus')
-    .setDescription('Show the current health of Black Hull Broadcast.'),
   new SlashCommandBuilder()
     .setName('partykey')
     .setDescription('Admin: manage SnareHound party API keys.')
@@ -3195,16 +3254,6 @@ const commandBuilders = [
       sub
         .setName('revokeall')
         .setDescription('Revoke all party API keys immediately.')
-    ),
-  new SlashCommandBuilder()
-    .setName('botrestart')
-    .setDescription('Restart Black Hull Broadcast through pm2.')
-    .addStringOption((option) =>
-      option
-        .setName('confirm')
-        .setDescription('Required confirmation value')
-        .setRequired(true)
-        .addChoices({ name: 'restart', value: 'restart' })
     ),
 ];
 
@@ -3268,16 +3317,26 @@ client.once(Events.ClientReady, async (readyClient) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isAutocomplete()) {
+    const subcommand = (() => {
+      try {
+        return interaction.options.getSubcommand();
+      } catch {
+        return '';
+      }
+    })();
+
     const fleetAutocompleteAllowed =
       interaction.inGuild() &&
       interaction.guildId === guildId &&
       interaction.channelId === commandChannelId &&
-      interaction.commandName === 'fleet';
+      interaction.commandName === 'fleet' &&
+      subcommand === 'ship';
     const opStateAutocompleteAllowed =
       interaction.inGuild() &&
       interaction.guildId === guildId &&
       interaction.channelId === adminCommandChannelId &&
-      (interaction.commandName === 'setopstate' || interaction.commandName === 'setoptime' || interaction.commandName === 'forceopreminder' || interaction.commandName === 'repostop') &&
+      interaction.commandName === 'ops' &&
+      (subcommand === 'state' || subcommand === 'time' || subcommand === 'remind' || subcommand === 'repost') &&
       canUseStaffCommand(interaction);
 
     if (!fleetAutocompleteAllowed && !opStateAutocompleteAllowed) {
@@ -3288,7 +3347,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       const focused = interaction.options.getFocused(true);
 
-      if (interaction.commandName === 'fleet') {
+      if (interaction.commandName === 'fleet' && subcommand === 'ship') {
         if (focused.name !== 'ship') {
           await interaction.respond([]);
           return;
@@ -3306,7 +3365,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      if (interaction.commandName === 'setopstate' || interaction.commandName === 'setoptime' || interaction.commandName === 'forceopreminder' || interaction.commandName === 'repostop') {
+      if (interaction.commandName === 'ops' && (subcommand === 'state' || subcommand === 'time' || subcommand === 'remind' || subcommand === 'repost')) {
         if (focused.name !== 'code') {
           await interaction.respond([]);
           return;
@@ -3315,7 +3374,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const payload = await fetchOpAdminAutocomplete(focused.value, interaction.user.id);
         const suggestions = Array.isArray(payload?.suggestions) ? payload.suggestions : [];
         const filteredSuggestions =
-          interaction.commandName === 'forceopreminder' || interaction.commandName === 'repostop'
+          subcommand === 'remind' || subcommand === 'repost'
             ? suggestions.filter((op) => {
                 const status = cleanText(op?.status).toLowerCase();
                 return status === 'planned' || status === 'active';
@@ -3342,7 +3401,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
-  const ephemeralCommands = new Set(['radio', 'ships', 'fleet', 'roster', 'adminqueue', 'authcheck', 'memberlookup', 'removed', 'botstatus', 'botrestart', 'setrank', 'partykey']);
+  const ephemeralCommands = new Set(['radio', 'member', 'memberadmin', 'fleet', 'system', 'partykey']);
 
   if (!interaction.inGuild() || interaction.guildId !== guildId) {
     await interaction.reply({
@@ -3617,199 +3676,228 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    if (interaction.commandName === 'setopstate') {
+    if (interaction.commandName === 'ops') {
+      const action = interaction.options.getSubcommand();
       await interaction.deferReply();
-      const code = cleanOpCode(interaction.options.getString('code', true));
-      const newState = cleanText(interaction.options.getString('state', true)).toLowerCase();
-      const payload = await submitSetOpState(code, newState, interaction.user.id);
-      await interaction.editReply({ content: formatSetOpStateMessage(payload, interaction.user.toString()) });
-      return;
-    }
 
-    if (interaction.commandName === 'setoptime') {
-      await interaction.deferReply();
-      const code = cleanOpCode(interaction.options.getString('code', true));
-      const year = interaction.options.getInteger('year', true);
-      const month = interaction.options.getInteger('month', true);
-      const day = interaction.options.getInteger('day', true);
-      const hour = interaction.options.getInteger('hour', true);
-      const minute = interaction.options.getInteger('minute', true);
-      const payload = await submitSetOpTime(code, year, month, day, hour, minute, interaction.user.id);
-      await interaction.editReply({ content: formatSetOpTimeMessage(payload, interaction.user.toString()) });
-      return;
-    }
-
-    if (interaction.commandName === 'forceopreminder') {
-      await interaction.deferReply();
-      const code = cleanOpCode(interaction.options.getString('code', true));
-      const timing = cleanText(interaction.options.getString('timing', true)).toLowerCase();
-      const payload = await submitForceOpReminder(code, timing, interaction.user.id);
-
-      const channel = await interaction.client.channels.fetch(opsReminderChannelId);
-      if (!channel?.isTextBased?.()) {
-        throw new Error(`Ops reminder channel is not text-based: ${opsReminderChannelId}`);
-      }
-
-      const sentMessage = await channel.send({
-        content: `@here **Black Hull Ops Reminder — ${formatReminderLabel(timing)} call — ${cleanOpCode(payload?.op?.opCode) || code || 'BH-????'}**`,
-        allowedMentions: { parse: ['everyone'] },
-        embeds: [buildOpsReminderEmbed(payload?.op || {}, timing)],
-      });
-
-      await trackOpsReminderMessage({
-        channel,
-        opId: payload?.op?.id,
-        startTime: payload?.op?.startTime,
-        timingKey: reminderTimingToWindowKey(timing),
-        sentMessage,
-        markSent: timing !== 'now',
-      });
-
-      await interaction.editReply({
-        content: formatForceOpReminderMessage(payload, interaction.user.toString(), `<#${opsReminderChannelId}>`, sentMessage?.url),
-      });
-      return;
-    }
-
-    if (interaction.commandName === 'repostop') {
-      await interaction.deferReply();
-      const code = cleanOpCode(interaction.options.getString('code', true));
-      const payload = await submitRepostOp(code, interaction.user.id);
-      await interaction.editReply({
-        content: formatRepostOpMessage(payload, interaction.user.toString(), `<#${opsReminderChannelId}>`),
-      });
-      return;
-    }
-
-    if (interaction.commandName === 'setrank') {
-      await interaction.deferReply({ ephemeral: true });
-      const member = interaction.options.getUser('member', true);
-      const rankTitle = cleanText(interaction.options.getString('rank', true));
-      const payload = await submitSetRank(member.id, rankTitle, interaction.user.id);
-      await interaction.editReply({
-        content: formatSetRankMessage(payload, interaction.user.toString(), member.toString()),
-      });
-      return;
-    }
-
-    if (interaction.commandName === 'ships') {
-      await interaction.deferReply({ ephemeral: true });
-      const member = interaction.options.getUser('member', true);
-      const payload = await fetchMemberShips(member.id);
-      await interaction.editReply(formatMemberShipsMessage(payload.member));
-      return;
-    }
-
-    if (interaction.commandName === 'fleet') {
-      await interaction.deferReply({ ephemeral: true });
-      const shipQuery = cleanText(interaction.options.getString('ship'));
-
-      if (shipQuery) {
-        const payload = await fetchFleetShipDetail(shipQuery);
-        await interaction.editReply(formatFleetShipDetailMessage(payload, shipQuery));
+      if (action === 'state') {
+        const code = cleanOpCode(interaction.options.getString('code', true));
+        const newState = cleanText(interaction.options.getString('state', true)).toLowerCase();
+        const payload = await submitSetOpState(code, newState, interaction.user.id);
+        await interaction.editReply({ content: formatSetOpStateMessage(payload, interaction.user.toString()) });
         return;
       }
 
-      const payload = await fetchFleetSummary();
-      await interaction.editReply(formatFleetSummaryMessage(payload));
-      return;
+      if (action === 'time') {
+        const code = cleanOpCode(interaction.options.getString('code', true));
+        const year = interaction.options.getInteger('year', true);
+        const month = interaction.options.getInteger('month', true);
+        const day = interaction.options.getInteger('day', true);
+        const hour = interaction.options.getInteger('hour', true);
+        const minute = interaction.options.getInteger('minute', true);
+        const payload = await submitSetOpTime(code, year, month, day, hour, minute, interaction.user.id);
+        await interaction.editReply({ content: formatSetOpTimeMessage(payload, interaction.user.toString()) });
+        return;
+      }
+
+      if (action === 'remind') {
+        const code = cleanOpCode(interaction.options.getString('code', true));
+        const timing = cleanText(interaction.options.getString('timing', true)).toLowerCase();
+        const payload = await submitForceOpReminder(code, timing, interaction.user.id);
+
+        const channel = await interaction.client.channels.fetch(opsReminderChannelId);
+        if (!channel?.isTextBased?.()) {
+          throw new Error(`Ops reminder channel is not text-based: ${opsReminderChannelId}`);
+        }
+
+        const sentMessage = await channel.send({
+          content: `@here **Black Hull Ops Reminder — ${formatReminderLabel(timing)} call — ${cleanOpCode(payload?.op?.opCode) || code || 'BH-????'}**`,
+          allowedMentions: { parse: ['everyone'] },
+          embeds: [buildOpsReminderEmbed(payload?.op || {}, timing)],
+        });
+
+        await trackOpsReminderMessage({
+          channel,
+          opId: payload?.op?.id,
+          startTime: payload?.op?.startTime,
+          timingKey: reminderTimingToWindowKey(timing),
+          sentMessage,
+          markSent: timing !== 'now',
+        });
+
+        await interaction.editReply({
+          content: formatForceOpReminderMessage(payload, interaction.user.toString(), `<#${opsReminderChannelId}>`, sentMessage?.url),
+        });
+        return;
+      }
+
+      if (action === 'repost') {
+        const code = cleanOpCode(interaction.options.getString('code', true));
+        const payload = await submitRepostOp(code, interaction.user.id);
+        await interaction.editReply({
+          content: formatRepostOpMessage(payload, interaction.user.toString(), `<#${opsReminderChannelId}>`),
+        });
+        return;
+      }
     }
 
-    if (interaction.commandName === 'roster') {
+    if (interaction.commandName === 'member') {
       await interaction.deferReply({ ephemeral: true });
-      const status = cleanText(interaction.options.getString('status'));
-      const payload = await fetchRoster(status);
-      await interaction.editReply(formatRosterMessage(payload, status));
-      return;
+      const action = interaction.options.getSubcommand();
+
+      if (action === 'ships') {
+        const member = interaction.options.getUser('member', true);
+        const payload = await fetchMemberShips(member.id);
+        await interaction.editReply(formatMemberShipsMessage(payload.member));
+        return;
+      }
     }
 
-    if (interaction.commandName === 'adminqueue') {
-      await interaction.deferReply({ ephemeral: true });
-      const payload = await fetchAdminQueue(interaction.user.id);
-      await interaction.editReply(formatAdminQueueMessage(payload));
-      return;
-    }
-
-    if (interaction.commandName === 'authcheck') {
-      await interaction.deferReply({ ephemeral: true });
-      const member = interaction.options.getUser('member', true);
-      const payload = await fetchAuthCheck(member.id, interaction.user.id);
-      await interaction.editReply(formatAuthCheckMessage(payload, member, interaction.guild));
-      return;
-    }
-
-    if (interaction.commandName === 'memberlookup') {
-      await interaction.deferReply({ ephemeral: true });
-      const member = interaction.options.getUser('member', true);
-      const [authResult, memberResult, removedResult] = await Promise.allSettled([
-        fetchAuthCheck(member.id, interaction.user.id),
-        fetchMemberLookup(member.id, interaction.user.id),
-        fetchRemoved(member.id, interaction.user.id),
-      ]);
-
-      const authPayload = authResult.status === 'fulfilled' ? authResult.value : {};
-      const memberPayload = memberResult.status === 'fulfilled' ? memberResult.value : {};
-      const removedPayload = removedResult.status === 'fulfilled' ? removedResult.value : {};
-
-      await interaction.editReply(
-        formatMemberLookupMessage(
-          {
-            authPayload,
-            memberPayload,
-            removedPayload,
-            authError: authResult.status === 'rejected'
-              ? summarizeSettledError(authResult.reason, 'Auth check failed.')
-              : '',
-            memberError: memberResult.status === 'rejected'
-              ? summarizeSettledError(memberResult.reason, 'Website file lookup failed.')
-              : '',
-            removedError: removedResult.status === 'rejected'
-              ? summarizeSettledError(removedResult.reason, 'Removed-roster lookup failed.')
-              : '',
-          },
-          member,
-          interaction.guild,
-        ),
-      );
-      return;
-    }
-
-    if (interaction.commandName === 'removed') {
-      await interaction.deferReply({ ephemeral: true });
-      const member = interaction.options.getUser('member');
-      const payload = await fetchRemoved(member?.id || '', interaction.user.id);
-      await interaction.editReply(formatRemovedMessage(payload, member));
-      return;
-    }
-
-    if (interaction.commandName === 'botstatus') {
-      await interaction.deferReply({ ephemeral: true });
-      await interaction.editReply({
-        content: await formatBotStatusMessage(client),
-      });
-      return;
-    }
-
-    if (interaction.commandName === 'botrestart') {
-      const confirm = cleanText(interaction.options.getString('confirm', true));
-      if (confirm !== 'restart') {
+    if (interaction.commandName === 'memberadmin') {
+      const action = interaction.options.getSubcommand();
+      const adminOnlyActions = new Set(['authcheck', 'lookup', 'removed']);
+      if (adminOnlyActions.has(action) && !canUseAdminCommand(interaction)) {
         await interaction.reply({
-          content: 'Confirmation failed. Use `/botrestart confirm:restart`.',
+          content: 'This subcommand is admin-only.',
           ephemeral: true,
         });
         return;
       }
 
-      await interaction.reply({
-        content: 'Restarting **Black Hull Broadcast** now. pm2 should bring me back in a few seconds.',
-        ephemeral: true,
-      });
+      await interaction.deferReply({ ephemeral: true });
 
-      setTimeout(() => {
-        console.log(`Bot restart requested by ${interaction.user.tag}`);
-        process.exit(0);
-      }, 1500);
-      return;
+      if (action === 'setrank') {
+        const member = interaction.options.getUser('member', true);
+        const rankTitle = cleanText(interaction.options.getString('rank', true));
+        const payload = await submitSetRank(member.id, rankTitle, interaction.user.id);
+        await interaction.editReply({
+          content: formatSetRankMessage(payload, interaction.user.toString(), member.toString()),
+        });
+        return;
+      }
+
+      if (action === 'authcheck') {
+        const member = interaction.options.getUser('member', true);
+        const payload = await fetchAuthCheck(member.id, interaction.user.id);
+        await interaction.editReply(formatAuthCheckMessage(payload, member, interaction.guild));
+        return;
+      }
+
+      if (action === 'lookup') {
+        const member = interaction.options.getUser('member', true);
+        const [authResult, memberResult, removedResult] = await Promise.allSettled([
+          fetchAuthCheck(member.id, interaction.user.id),
+          fetchMemberLookup(member.id, interaction.user.id),
+          fetchRemoved(member.id, interaction.user.id),
+        ]);
+
+        const authPayload = authResult.status === 'fulfilled' ? authResult.value : {};
+        const memberPayload = memberResult.status === 'fulfilled' ? memberResult.value : {};
+        const removedPayload = removedResult.status === 'fulfilled' ? removedResult.value : {};
+
+        await interaction.editReply(
+          formatMemberLookupMessage(
+            {
+              authPayload,
+              memberPayload,
+              removedPayload,
+              authError: authResult.status === 'rejected'
+                ? summarizeSettledError(authResult.reason, 'Auth check failed.')
+                : '',
+              memberError: memberResult.status === 'rejected'
+                ? summarizeSettledError(memberResult.reason, 'Website file lookup failed.')
+                : '',
+              removedError: removedResult.status === 'rejected'
+                ? summarizeSettledError(removedResult.reason, 'Removed-roster lookup failed.')
+                : '',
+            },
+            member,
+            interaction.guild,
+          ),
+        );
+        return;
+      }
+
+      if (action === 'removed') {
+        const member = interaction.options.getUser('member');
+        const payload = await fetchRemoved(member?.id || '', interaction.user.id);
+        await interaction.editReply(formatRemovedMessage(payload, member));
+        return;
+      }
+    }
+
+    if (interaction.commandName === 'fleet') {
+      await interaction.deferReply({ ephemeral: true });
+      const action = interaction.options.getSubcommand();
+
+      if (action === 'summary') {
+        const payload = await fetchFleetSummary();
+        await interaction.editReply(formatFleetSummaryMessage(payload));
+        return;
+      }
+
+      if (action === 'ship') {
+        const shipQuery = cleanText(interaction.options.getString('ship', true));
+        const payload = await fetchFleetShipDetail(shipQuery);
+        await interaction.editReply(formatFleetShipDetailMessage(payload, shipQuery));
+        return;
+      }
+
+      if (action === 'roster') {
+        const status = cleanText(interaction.options.getString('status'));
+        const payload = await fetchRoster(status);
+        await interaction.editReply(formatRosterMessage(payload, status));
+        return;
+      }
+    }
+
+    if (interaction.commandName === 'system') {
+      const action = interaction.options.getSubcommand();
+      const adminOnlyActions = new Set(['queue', 'restart']);
+      if (adminOnlyActions.has(action) && !canUseAdminCommand(interaction)) {
+        await interaction.reply({
+          content: 'This subcommand is admin-only.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (action === 'status') {
+        await interaction.deferReply({ ephemeral: true });
+        await interaction.editReply({
+          content: await formatBotStatusMessage(client),
+        });
+        return;
+      }
+
+      if (action === 'queue') {
+        await interaction.deferReply({ ephemeral: true });
+        const payload = await fetchAdminQueue(interaction.user.id);
+        await interaction.editReply(formatAdminQueueMessage(payload));
+        return;
+      }
+
+      if (action === 'restart') {
+        const confirm = cleanText(interaction.options.getString('confirm', true));
+        if (confirm !== 'restart') {
+          await interaction.reply({
+            content: 'Confirmation failed. Use `/system restart confirm:restart`.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        await interaction.reply({
+          content: 'Restarting **Black Hull Broadcast** now. pm2 should bring me back in a few seconds.',
+          ephemeral: true,
+        });
+
+        setTimeout(() => {
+          console.log(`Bot restart requested by ${interaction.user.tag}`);
+          process.exit(0);
+        }, 1500);
+        return;
+      }
     }
 
     if (interaction.commandName === 'partykey') {
