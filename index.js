@@ -3367,6 +3367,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
+      if (!isVoiceConnectionReady() && (
+        player.state.status === AudioPlayerStatus.Playing
+        || player.state.status === AudioPlayerStatus.Buffering
+        || player.state.status === AudioPlayerStatus.Paused
+      )) {
+        disconnectFromVoice(interaction.guildId);
+      }
+
       try {
         await connectToVoiceChannel(memberVoiceChannel);
       } catch (error) {
