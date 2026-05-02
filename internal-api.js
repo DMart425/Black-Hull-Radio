@@ -71,6 +71,38 @@ async function fetchTargetChannel(client, channelId) {
   return channel;
 }
 
+function buildCustomEmbed(embedData) {
+  const e = new EmbedBuilder();
+  if (embedData.title)       e.setTitle(String(embedData.title).slice(0, 256));
+  if (embedData.titleUrl)    e.setURL(embedData.titleUrl);
+  if (embedData.description) e.setDescription(String(embedData.description).slice(0, 4096));
+  if (typeof embedData.color === 'number') e.setColor(embedData.color);
+  if (embedData.authorName) {
+    const author = { name: String(embedData.authorName) };
+    if (embedData.authorIconUrl) author.iconURL = embedData.authorIconUrl;
+    if (embedData.authorUrl)     author.url     = embedData.authorUrl;
+    e.setAuthor(author);
+  }
+  if (embedData.thumbnailUrl) e.setThumbnail(embedData.thumbnailUrl);
+  if (embedData.imageUrl)     e.setImage(embedData.imageUrl);
+  if (embedData.footerText) {
+    const footer = { text: String(embedData.footerText) };
+    if (embedData.footerIconUrl) footer.iconURL = embedData.footerIconUrl;
+    e.setFooter(footer);
+  }
+  if (embedData.includeTimestamp) e.setTimestamp();
+  if (Array.isArray(embedData.fields) && embedData.fields.length > 0) {
+    e.addFields(
+      embedData.fields.slice(0, 25).map((f) => ({
+        name:   String(f.name  || '').slice(0, 256)  || '\u200b',
+        value:  String(f.value || '').slice(0, 1024) || '\u200b',
+        inline: Boolean(f.inline),
+      }))
+    );
+  }
+  return e;
+}
+
 async function handleApprovedEvent({ client, body }) {
   const media = body.media || {};
   const channelId = clean(body.channelId);
@@ -402,6 +434,111 @@ function startInternalApi({ port, client, handlers = {} }) {
     } catch (error) {
       console.error('[internal-api] party-keys revoke failure:', error);
       return jsonError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
+    }
+  });
+
+  // ── Discord channel listing ───────────────────────────────────────────────
+  app.get('/internal/channels', async (req, res) => {
+    try {
+      const auth = req.headers.authorization || '';
+      if (!sharedSecret || auth !== `Bearer ${sharedSecret}`) {
+        return jsonError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+      }
+      if (!client?.isReady?.()) {
+        return jsonError(res, 503, 'Discord client is not ready', 'CLIENT_NOT_READY');
+      }
+      const guildId = process.env.GUILD_ID;
+      if (!guildId) return jsonError(res, 500, 'GUILD_ID not configured', 'CONFIG_ERROR');
+      const guild = await client.guilds.fetch(guildId);
+      await guild.channels.fetch();
+      const channels = guild.channels.cache
+        .filter((c) => c.isTextBased() && !c.isThread())
+        .map((c) => ({ id: c.id, name: c.name, parentName: c.parent?.name ?? null }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return res.json({ ok: true, channels });
+    } catch (error) {
+      console.error('[internal-api] channels list failure:', error);
+      return jsonError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
+    }
+  });
+
+  // ── Embed Discord operations ──────────────────────────────────────────────
+  app.post('/internal/embeds/send', async (req, res) => {
+    try {
+      const auth = req.headers.authorization || '';
+      if (!sharedSecret || auth !== `Bearer ${sharedSecret}`) {
+        return jsonError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+      }
+      if (!client?.isReady?.()) {
+        return jsonError(res, 503, 'Discord client is not ready', 'CLIENT_NOT_READY');
+      }
+      const body = req.body || {};
+      const channelId = clean(body.channelId);
+      if (!channelId) return jsonError(res, 400, 'Missing channelId', 'BAD_REQUEST');
+      if (!body.embed || typeof body.embed !== 'object') {
+        return jsonError(res, 400, 'Missing embed payload', 'BAD_REQUEST');
+      }
+      const channel = await fetchTargetChannel(client, channelId);
+      const embed = buildCustomEmbed(body.embed);
+      const message = await channel.send({ embeds: [embed] });
+      return res.json({ ok: true, channelId: channel.id, messageId: message.id });
+    } catch (error) {
+      console.error('[internal-api] embed send failure:', error);
+      return jsonError(res, 500, error.message || 'Internal server error', 'INTERNAL_ERROR');
+    }
+  });
+
+  app.patch('/internal/embeds/send', async (req, res) => {
+    try {
+      const auth = req.headers.authorization || '';
+      if (!sharedSecret || auth !== `Bearer ${sharedSecret}`) {
+        return jsonError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+      }
+      if (!client?.isReady?.()) {
+        return jsonError(res, 503, 'Discord client is not ready', 'CLIENT_NOT_READY');
+      }
+      const body = req.body || {};
+      const channelId = clean(body.channelId);
+      const messageId = clean(body.messageId);
+      if (!channelId || !messageId) return jsonError(res, 400, 'Missing channelId or messageId', 'BAD_REQUEST');
+      if (!body.embed || typeof body.embed !== 'object') {
+        return jsonError(res, 400, 'Missing embed payload', 'BAD_REQUEST');
+      }
+      const channel = await fetchTargetChannel(client, channelId);
+      const message = await channel.messages.fetch(messageId);
+      const embed = buildCustomEmbed(body.embed);
+      await message.edit({ embeds: [embed] });
+      return res.json({ ok: true, channelId, messageId });
+    } catch (error) {
+      console.error('[internal-api] embed edit failure:', error);
+      if (error.code === 10008) {
+        return jsonError(res, 404, 'Discord message not found — it may have been deleted', 'MESSAGE_NOT_FOUND');
+      }
+      return jsonError(res, 500, error.message || 'Internal server error', 'INTERNAL_ERROR');
+    }
+  });
+
+  app.delete('/internal/embeds/send', async (req, res) => {
+    try {
+      const auth = req.headers.authorization || '';
+      if (!sharedSecret || auth !== `Bearer ${sharedSecret}`) {
+        return jsonError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+      }
+      if (!client?.isReady?.()) {
+        return jsonError(res, 503, 'Discord client is not ready', 'CLIENT_NOT_READY');
+      }
+      const body = req.body || {};
+      const channelId = clean(body.channelId);
+      const messageId = clean(body.messageId);
+      if (!channelId || !messageId) return jsonError(res, 400, 'Missing channelId or messageId', 'BAD_REQUEST');
+      const channel = await fetchTargetChannel(client, channelId);
+      const message = await channel.messages.fetch(messageId).catch(() => null);
+      if (message) await message.delete();
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('[internal-api] embed delete failure:', error);
+      if (error.code === 10008) return res.json({ ok: true, note: 'Message already deleted' });
+      return jsonError(res, 500, error.message || 'Internal server error', 'INTERNAL_ERROR');
     }
   });
 
