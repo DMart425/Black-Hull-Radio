@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { startInternalApi } = require('./internal-api');
-const { startPartyApi, generateKeyForUser, revokeKeyForUser } = require('./party-api');
+const { startPartyApi, generateKeyForUser, revokeKeyForUser, revokeAllKeys } = require('./party-api');
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -60,6 +60,7 @@ const adminRoleIds = (process.env.DISCORD_ADMIN_ROLE_IDS || '').split(',').map((
 const officerRoleIds = (process.env.DISCORD_OFFICER_ROLE_IDS || '').split(',').map((entry) => entry.trim()).filter(Boolean);
 const staffRoleIds = [...new Set([...adminRoleIds, ...officerRoleIds])];
 const partyApiPort = Math.max(1024, Number(process.env.PARTY_API_PORT || '3002'));
+const partyKeyOwnerUserId = (process.env.PARTY_KEY_OWNER_USER_ID || process.env.BOT_OWNER_USER_ID || '').trim();
 
 if (!token || !guildId) {
   console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
@@ -3168,6 +3169,11 @@ const commands = [
         .addUserOption((option) =>
           option.setName('member').setDescription('Member whose key to revoke').setRequired(true)
         )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('revokeall')
+        .setDescription('Revoke all party API keys immediately.')
     ),
   new SlashCommandBuilder()
     .setName('botrestart')
@@ -3767,10 +3773,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.commandName === 'partykey') {
-      const sub    = interaction.options.getSubcommand();
-      const target = interaction.options.getUser('member', true);
+      const ownerId = partyKeyOwnerUserId || interaction.guild?.ownerId;
+      if (!ownerId || interaction.user.id !== ownerId) {
+        await interaction.reply({
+          content: 'Only the designated party key owner can run this command.',
+          ephemeral: true,
+        });
+        return;
+      }
 
+      const sub    = interaction.options.getSubcommand();
       if (sub === 'generate') {
+        const target = interaction.options.getUser('member', true);
         const key = generateKeyForUser(target.id);
         try {
           await target.send(
@@ -3794,11 +3808,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (sub === 'revoke') {
+        const target = interaction.options.getUser('member', true);
         const revoked = revokeKeyForUser(target.id);
         await interaction.reply({
           content: revoked
             ? `Party key revoked for ${target.toString()}. Their SnareHound will stop syncing.`
             : `${target.toString()} did not have an active party key.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (sub === 'revokeall') {
+        const revokedCount = revokeAllKeys();
+        await interaction.reply({
+          content: `Revoked **${revokedCount}** party key${revokedCount === 1 ? '' : 's'}.`,
           ephemeral: true,
         });
         return;

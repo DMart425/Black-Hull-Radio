@@ -21,6 +21,8 @@ const fs      = require('fs');
 const path    = require('path');
 
 const AUDIO_DIR = path.resolve(process.env.AUDIO_DIR || './audio');
+const STATE_DIR = path.resolve(process.env.STATE_DIR || './state');
+const PARTY_KEYS_STATE_PATH = path.resolve(STATE_DIR, process.env.PARTY_KEYS_STATE_FILE || 'party-keys-state.json');
 const ALLOWED_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac']);
 
 // ── In-memory stores ──────────────────────────────────────────────────────────
@@ -108,6 +110,56 @@ function jsonError(res, status, error) {
   return res.status(status).json({ ok: false, error });
 }
 
+function ensureStateDirectory() {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+}
+
+function saveKeysToDisk() {
+  ensureStateDirectory();
+
+  const keys = Array.from(partyKeys.entries()).map(([discordUserId, key]) => ({
+    discordUserId,
+    key,
+  }));
+
+  const payload = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    keys,
+  };
+
+  fs.writeFileSync(PARTY_KEYS_STATE_PATH, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function loadKeysFromDisk() {
+  partyKeys.clear();
+  keyToUser.clear();
+
+  if (!fs.existsSync(PARTY_KEYS_STATE_PATH)) {
+    return;
+  }
+
+  try {
+    const raw = fs.readFileSync(PARTY_KEYS_STATE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    const keyRows = Array.isArray(parsed?.keys) ? parsed.keys : [];
+
+    for (const row of keyRows) {
+      const discordUserId = safeStr(row?.discordUserId, 64);
+      const key = safeStr(row?.key, 128);
+
+      if (!discordUserId || !key || !key.startsWith('bhs-party-')) {
+        continue;
+      }
+
+      partyKeys.set(discordUserId, key);
+      keyToUser.set(key, discordUserId);
+    }
+  } catch (error) {
+    console.error('[party-api] Failed to load party keys state:', error);
+  }
+}
+
 // ── Auth middleware ───────────────────────────────────────────────────────────
 function authPartyKey(req, res, next) {
   const auth = req.headers.authorization || '';
@@ -124,6 +176,8 @@ function authPartyKey(req, res, next) {
 
 // ── API factory ───────────────────────────────────────────────────────────────
 function startPartyApi(port) {
+  loadKeysFromDisk();
+
   const app = express();
   app.use(express.json({ limit: '64kb' }));
 
@@ -220,6 +274,7 @@ function generateKeyForUser(discordUserId) {
   const key = generateKey();
   partyKeys.set(discordUserId, key);
   keyToUser.set(key, discordUserId);
+  saveKeysToDisk();
   return key;
 }
 
@@ -229,11 +284,23 @@ function revokeKeyForUser(discordUserId) {
   keyToUser.delete(existing);
   partyKeys.delete(discordUserId);
   partyState.delete(discordUserId);
+  rateLimits.delete(existing);
+  saveKeysToDisk();
   return true;
+}
+
+function revokeAllKeys() {
+  const revokedCount = partyKeys.size;
+  partyKeys.clear();
+  keyToUser.clear();
+  partyState.clear();
+  rateLimits.clear();
+  saveKeysToDisk();
+  return revokedCount;
 }
 
 function hasKey(discordUserId) {
   return partyKeys.has(discordUserId);
 }
 
-module.exports = { startPartyApi, generateKeyForUser, revokeKeyForUser, hasKey };
+module.exports = { startPartyApi, generateKeyForUser, revokeKeyForUser, revokeAllKeys, hasKey };
