@@ -61,6 +61,10 @@ const officerRoleIds = (process.env.DISCORD_OFFICER_ROLE_IDS || '').split(',').m
 const staffRoleIds = [...new Set([...adminRoleIds, ...officerRoleIds])];
 const partyApiPort = Math.max(1024, Number(process.env.PARTY_API_PORT || '3002'));
 const partyKeyOwnerUserId = (process.env.PARTY_KEY_OWNER_USER_ID || process.env.BOT_OWNER_USER_ID || '').trim();
+const staffOnlyCommands = new Set(['botstatus', 'setopstate', 'setoptime', 'forceopreminder', 'repostop', 'setrank']);
+const adminOnlyCommands = new Set(['adminqueue', 'authcheck', 'memberlookup', 'removed', 'botrestart', 'partykey']);
+const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
+const memberChannelCommands = new Set(['play', 'stop', 'nowplaying', 'skip', 'queue', 'library', 'request', 'roll', 'ships', 'fleet', 'roster']);
 
 if (!token || !guildId) {
   console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
@@ -2914,7 +2918,7 @@ player.on('error', (error) => {
   console.error('Player error:', error);
 });
 
-const commands = [
+const commandBuilders = [
   new SlashCommandBuilder()
     .setName('play')
     .setDescription('Join your voice channel and start radio shuffle.'),
@@ -3185,7 +3189,22 @@ const commands = [
         .setRequired(true)
         .addChoices({ name: 'restart', value: 'restart' })
     ),
-].map((command) => command.toJSON());
+];
+
+for (const command of commandBuilders) {
+  command.setDMPermission(false);
+
+  if (adminOnlyCommands.has(command.name)) {
+    command.setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator);
+    continue;
+  }
+
+  if (staffOnlyCommands.has(command.name)) {
+    command.setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild);
+  }
+}
+
+const commands = commandBuilders.map((command) => command.toJSON());
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
@@ -3231,11 +3250,6 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  const staffOnlyCommands = new Set(['botstatus', 'setopstate', 'setoptime', 'forceopreminder', 'repostop', 'setrank']);
-  const adminOnlyCommands = new Set(['adminqueue', 'authcheck', 'memberlookup', 'removed', 'botrestart', 'partykey']);
-  const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
-  const memberChannelCommands = new Set(['play', 'stop', 'nowplaying', 'skip', 'queue', 'library', 'request', 'roll', 'ships', 'fleet', 'roster']);
-
   if (interaction.isAutocomplete()) {
     const fleetAutocompleteAllowed =
       interaction.inGuild() &&
