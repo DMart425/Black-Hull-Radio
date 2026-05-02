@@ -12,6 +12,7 @@ const {
   Routes,
   SlashCommandBuilder,
   EmbedBuilder,
+  MessageFlags,
   PermissionsBitField,
 } = require('discord.js');
 const {
@@ -3403,7 +3404,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.inGuild() || interaction.guildId !== guildId) {
     await interaction.reply({
       content: 'This bot only works inside the configured server.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -3418,7 +3419,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const channelLabel = requiredChannelId === adminCommandChannelId ? 'admin commands' : 'bot commands';
     await interaction.reply({
       content: `Use ${channelLabel} in <#${requiredChannelId}>.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -3427,14 +3428,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (staffOnlyCommands.has(interaction.commandName) && !canUseStaffCommand(interaction)) {
       await interaction.reply({
         content: 'This command is staff-only.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
     if (adminOnlyCommands.has(interaction.commandName) && !canUseAdminCommand(interaction)) {
       await interaction.reply({
         content: 'This command is admin-only.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -3447,7 +3448,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (!memberVoiceChannel) {
           await interaction.reply({
             content: 'Join a voice channel first, then run /radio play.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -3458,7 +3459,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (missingPermissions.length > 0) {
           await interaction.reply({
             content: `I cannot join <#${memberVoiceChannel.id}>. Missing permissions: ${missingPermissions.join(', ')}`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -3477,7 +3478,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const message = error instanceof Error ? error.message : String(error || 'Unknown voice error.');
           await interaction.reply({
             content: `I could not join <#${memberVoiceChannel.id}>. ${truncateText(message, 140)}`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -3500,7 +3501,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await interaction.reply({
           content: `Joined <#${memberVoiceChannel.id}>. ${nowPlayingText}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3510,7 +3511,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (!activeConnection) {
           await interaction.reply({
             content: 'Already disconnected.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -3519,7 +3520,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await interaction.reply({
           content: 'Stopped playback and disconnected from voice.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3530,20 +3531,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
             : `Now playing: **${displayName(currentTrack)}**`
           : 'Nothing is playing right now.';
 
-        await interaction.reply({ content: text, ephemeral: true });
+        await interaction.reply({ content: text, flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (action === 'skip') {
         if (!currentTrack) {
-          await interaction.reply({ content: 'Nothing is playing right now.', ephemeral: true });
+          await interaction.reply({ content: 'Nothing is playing right now.', flags: MessageFlags.Ephemeral });
           return;
         }
 
         playNext();
         await interaction.reply({
           content: `Skipped. Now playing: **${displayName(currentTrack)}**`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3556,7 +3557,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await interaction.reply({
           content: `**Next 5 tracks**\n${text}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3574,7 +3575,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (library.length === 0) {
           await interaction.reply({
             content: search ? `No tracks found for **${search}**.` : 'The library is empty.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -3594,7 +3595,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await interaction.reply({
           content: `${heading}\n${body}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3611,14 +3612,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             await interaction.reply({
               content: `More than one track matched **${query}**. Try one of these:\n${suggestions}`,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
             return;
           }
 
           await interaction.reply({
             content: `No track matched **${query}**.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -3627,14 +3628,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         await interaction.reply({
           content: `Queued next: **${displayName(result.match)}**`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       await interaction.reply({
         content: 'Unknown radio action.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -3645,7 +3646,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (duplicates.length > 0) {
         await interaction.reply({
           content: `Duplicate entrants are not allowed. Remove the repeats and try again. Duplicates: ${duplicates.map((user) => user.toString()).join(', ')}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3653,7 +3654,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (entrants.length < 2) {
         await interaction.reply({
           content: 'Select at least 2 entrants.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3744,12 +3745,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (adminOnlyActions.has(action) && !canUseAdminCommand(interaction)) {
         await interaction.reply({
           content: 'This subcommand is admin-only.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       if (action === 'setrank') {
         const member = interaction.options.getUser('member', true);
@@ -3812,7 +3813,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.commandName === 'fleet') {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const action = interaction.options.getSubcommand();
 
       if (action === 'ships') {
@@ -3849,13 +3850,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (adminOnlyActions.has(action) && !canUseAdminCommand(interaction)) {
         await interaction.reply({
           content: 'This subcommand is admin-only.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       if (action === 'status') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         await interaction.editReply({
           content: await formatBotStatusMessage(client),
         });
@@ -3863,7 +3864,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (action === 'queue') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const payload = await fetchAdminQueue(interaction.user.id);
         await interaction.editReply(formatAdminQueueMessage(payload));
         return;
@@ -3874,14 +3875,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (confirm !== 'restart') {
           await interaction.reply({
             content: 'Confirmation failed. Use `/system restart confirm:restart`.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
 
         await interaction.reply({
           content: 'Restarting **Black Hull Broadcast** now. pm2 should bring me back in a few seconds.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
 
         setTimeout(() => {
@@ -3897,7 +3898,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (!ownerId || interaction.user.id !== ownerId) {
         await interaction.reply({
           content: 'Only the designated party key owner can run this command.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3916,12 +3917,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           );
           await interaction.reply({
             content: `Party key generated for ${target.toString()} and sent via DM.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         } catch {
           await interaction.reply({
             content: `Key generated but DM failed (${target.toString()} may have DMs disabled).\n\nKey (share privately):\n\`${key}\``,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         }
         return;
@@ -3934,7 +3935,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           content: revoked
             ? `Party key revoked for ${target.toString()}. Their SnareHound will stop syncing.`
             : `${target.toString()} did not have an active party key.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3943,7 +3944,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const revokedCount = revokeAllKeys();
         await interaction.reply({
           content: `Revoked **${revokedCount}** party key${revokedCount === 1 ? '' : 's'}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -3951,7 +3952,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     await interaction.reply({
       content: 'Unknown command.',
-      ephemeral: ephemeralCommands.has(interaction.commandName),
+      flags: ephemeralCommands.has(interaction.commandName) ? MessageFlags.Ephemeral : undefined,
     });
   } catch (error) {
     console.error(error);
@@ -3959,18 +3960,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const fallbackEphemeral = ephemeralCommands.has(interaction.commandName);
     const message = error instanceof Error ? error.message : 'Something went wrong.';
 
-    if (interaction.replied) {
-      await interaction.followUp({
-        content: message,
-        ephemeral: fallbackEphemeral,
-      });
-    } else if (interaction.deferred) {
-      await interaction.editReply({ content: message });
-    } else {
-      await interaction.reply({
-        content: message,
-        ephemeral: fallbackEphemeral,
-      });
+    try {
+      if (interaction.replied) {
+        await interaction.followUp({
+          content: message,
+          flags: fallbackEphemeral ? MessageFlags.Ephemeral : undefined,
+        });
+      } else if (interaction.deferred) {
+        await interaction.editReply({ content: message });
+      } else {
+        await interaction.reply({
+          content: message,
+          flags: fallbackEphemeral ? MessageFlags.Ephemeral : undefined,
+        });
+      }
+    } catch {
+      // Interaction may have expired (Discord error 10062) — nothing to do.
     }
   }
 });
