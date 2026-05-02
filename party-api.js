@@ -19,6 +19,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const fs      = require('fs');
 const path    = require('path');
+const activityTracker = require('./activity-tracker');
 
 const AUDIO_DIR = path.resolve(process.env.AUDIO_DIR || './audio');
 const STATE_DIR = path.resolve(process.env.STATE_DIR || './state');
@@ -213,6 +214,9 @@ function startPartyApi(port) {
       lastSeen:   new Date().toISOString(),
       lastSeenMs: Date.now(),
     });
+
+    // Fire-and-forget activity tracking
+    activityTracker.onSnareHoundPush(req.discordUserId).catch(() => {});
 
     return res.json({ ok: true });
   });

@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { startInternalApi } = require('./internal-api');
 const { startPartyApi, generateKeyForUser, revokeKeyForUser, revokeAllKeys, listKeys } = require('./party-api');
+const activityTracker = require('./activity-tracker');
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -3253,6 +3254,20 @@ const commandBuilders = [
         .setName('revokeall')
         .setDescription('Revoke all party API keys immediately.')
     ),
+
+  new SlashCommandBuilder()
+    .setName('leaderboard')
+    .setDescription('Show the BHS activity leaderboard.')
+    .addStringOption((option) =>
+      option
+        .setName('period')
+        .setDescription('Time period to show (default: this month)')
+        .setRequired(false)
+        .addChoices(
+          { name: 'This month', value: 'month' },
+          { name: 'All time',   value: 'alltime' },
+        )
+    ),
 ];
 
 for (const command of commandBuilders) {
@@ -3271,7 +3286,14 @@ for (const command of commandBuilders) {
 const commands = commandBuilders.map((command) => command.toJSON());
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.GuildMembers,
+  ],
 });
 
 client.once(Events.ClientReady, async (readyClient) => {
@@ -3950,6 +3972,57 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
+    if (interaction.commandName === 'leaderboard') {
+      const allowedChannelId = '1487965611685314700'; // #bot-commands-here
+      if (interaction.channelId !== allowedChannelId) {
+        await interaction.reply({
+          content: `The leaderboard can only be used in <#${allowedChannelId}>.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.deferReply();
+
+      const period = interaction.options.getString('period') ?? 'month';
+      const isAllTime = period === 'alltime';
+
+      let rows = [];
+      try {
+        const data = await fetchSiteJson('/api/internal/leaderboard', { period });
+        rows = data?.entries ?? [];
+      } catch (err) {
+        console.error('[leaderboard] fetch error:', err);
+        await interaction.editReply('Failed to fetch leaderboard data. Try again shortly.');
+        return;
+      }
+
+      if (!rows.length) {
+        await interaction.editReply('No activity data recorded yet.');
+        return;
+      }
+
+      const medals = ['🥇', '🥈', '🥉'];
+      const lines = rows.slice(0, 10).map((entry, i) => {
+        const prefix  = medals[i] ?? `**${i + 1}.**`;
+        const name    = entry.rsiName || entry.discordName || entry.discordUserId;
+        const hours   = entry.totalHours != null   ? `${entry.totalHours}h` : null;
+        const msgs    = entry.totalMessages != null ? `${entry.totalMessages} msgs` : null;
+        const stats   = [hours, msgs].filter(Boolean).join(' · ');
+        return `${prefix} **${name}** — ${stats}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle(`BHS Activity Leaderboard — ${isAllTime ? 'All Time' : 'This Month'}`)
+        .setDescription(lines.join('\n'))
+        .setColor(0x8b0000)
+        .setFooter({ text: 'Black Hull Syndicate' })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+      return;
+    }
+
     await interaction.reply({
       content: 'Unknown command.',
       flags: ephemeralCommands.has(interaction.commandName) ? MessageFlags.Ephemeral : undefined,
@@ -3994,5 +4067,35 @@ startInternalApi({
 internalApiStartedAt = new Date().toISOString();
 
 startPartyApi(partyApiPort);
+
+// ── Activity tracking events ──────────────────────────────────────────────────
+
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  activityTracker.onVoiceStateUpdate(oldState, newState).catch((err) => {
+    console.error('[activity-tracker] voiceStateUpdate error:', err);
+  });
+});
+
+client.on(Events.PresenceUpdate, (oldPresence, newPresence) => {
+  activityTracker.onPresenceUpdate(oldPresence, newPresence).catch((err) => {
+    console.error('[activity-tracker] presenceUpdate error:', err);
+  });
+});
+
+client.on(Events.MessageCreate, (message) => {
+  activityTracker.onMessageCreate(message).catch((err) => {
+    console.error('[activity-tracker] messageCreate error:', err);
+  });
+});
+
+process.once('SIGTERM', async () => {
+  await activityTracker.closeAllSessions();
+  process.exit(0);
+});
+
+process.once('SIGINT', async () => {
+  await activityTracker.closeAllSessions();
+  process.exit(0);
+});
 
 client.login(token);
