@@ -15,6 +15,7 @@ const {
 } = require('discord.js');
 const {
   joinVoiceChannel,
+  getVoiceConnection,
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
@@ -1272,6 +1273,25 @@ function getNextTrack() {
 
 function isVoiceConnectionReady() {
   return Boolean(connection && connection.state?.status === VoiceConnectionStatus.Ready);
+}
+
+function disconnectFromVoice(guildIdForConnection) {
+  const activeConnection = getVoiceConnection(guildIdForConnection) || connection;
+
+  try {
+    player.stop(true);
+  } catch {}
+
+  currentTrack = null;
+  currentRequestedBy = null;
+
+  if (activeConnection) {
+    try {
+      activeConnection.destroy();
+    } catch {}
+  }
+
+  connection = null;
 }
 
 function playTrack(trackInfo) {
@@ -3346,7 +3366,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.commandName === 'stop') {
-      if (!connection) {
+      const activeConnection = getVoiceConnection(interaction.guildId) || connection;
+      if (!activeConnection) {
         await interaction.reply({
           content: 'Already disconnected.',
           ephemeral: true,
@@ -3354,18 +3375,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      try {
-        player.stop(true);
-      } catch {}
-
-      currentTrack = null;
-      currentRequestedBy = null;
-
-      try {
-        connection.destroy();
-      } catch {}
-
-      connection = null;
+      disconnectFromVoice(interaction.guildId);
 
       await interaction.reply({
         content: 'Stopped playback and disconnected from voice.',
