@@ -34,17 +34,17 @@ const adminCommandChannelId = process.env.ADMIN_COMMAND_CHANNEL_ID || '149042117
 const audioDir = path.resolve(process.env.AUDIO_DIR || './audio');
 const volume = Number(process.env.VOLUME || '0.15');
 const mediaSyncPort = Number(process.env.MEDIA_SYNC_PORT || '3001');
-const rsiNewsChannelId = process.env.RSI_NEWS_CHANNEL_ID || '1368817161971171389';
+let rsiNewsChannelId = process.env.RSI_NEWS_CHANNEL_ID || '1368817161971171389';
 const rsiCommLinkFeedUrl = (process.env.RSI_COMM_LINK_FEED_URL || 'https://robertsspaceindustries.com/en/comm-link/rss').trim();
 const rsiNewsPollMinutes = Math.max(2, Number(process.env.RSI_NEWS_POLL_MINUTES || '10'));
-const rsiStatusChannelId = process.env.RSI_STATUS_CHANNEL_ID || '1490468151614374032';
+let rsiStatusChannelId = process.env.RSI_STATUS_CHANNEL_ID || '1490468151614374032';
 const rsiStatusFeedUrl = (process.env.RSI_STATUS_FEED_URL || 'https://status.robertsspaceindustries.com/index.xml').trim();
 const rsiStatusPollMinutes = Math.max(2, Number(process.env.RSI_STATUS_POLL_MINUTES || '10'));
-const rsiPatchNotesChannelId = process.env.RSI_PATCH_NOTES_CHANNEL_ID || '1490469269211840653';
+let rsiPatchNotesChannelId = process.env.RSI_PATCH_NOTES_CHANNEL_ID || '1490469269211840653';
 const rsiPatchNotesHubUrl = (process.env.RSI_PATCH_NOTES_HUB_URL || 'https://robertsspaceindustries.com/en/patch-notes').trim();
 const rsiPatchNotesForumUrl = (process.env.RSI_PATCH_NOTES_FORUM_URL || 'https://robertsspaceindustries.com/spectrum/community/SC/forum/190048').trim();
 const rsiPatchNotesPollMinutes = Math.max(2, Number(process.env.RSI_PATCH_NOTES_POLL_MINUTES || '10'));
-const opsReminderChannelId = (process.env.OPS_REMINDER_CHANNEL_ID || '1368992696487641438').trim();
+let opsReminderChannelId = (process.env.OPS_REMINDER_CHANNEL_ID || '1368992696487641438').trim();
 const opsReminderPollMinutes = Math.max(1, Number(process.env.OPS_REMINDER_POLL_MINUTES || '2'));
 const opsReminderLookaheadDays = Math.max(1, Number(process.env.OPS_REMINDER_LOOKAHEAD_DAYS || '7'));
 const opsReminderStagingLeadMinutes = Math.max(1, Number(process.env.OPS_REMINDER_STAGING_LEAD_MINUTES || '30'));
@@ -1408,6 +1408,34 @@ function asPlainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value
     : {};
+}
+
+/**
+ * Apply channel routing overrides from botRuntimeConfig.channelRouting.
+ * Supported keys:
+ *   rsi_comm_link   — RSI Comm-Link feed channel ID
+ *   rsi_status      — RSI Status feed channel ID
+ *   rsi_patch_notes — RSI Patch Notes feed channel ID
+ *   ops_reminder    — Ops reminder channel ID
+ *
+ * Env var values remain as fallback if a key is absent or empty.
+ */
+function applyChannelRoutingOverrides() {
+  const routing = botRuntimeConfig.channelRouting || {};
+
+  const override = (current, key) => {
+    const val = typeof routing[key] === 'string' ? routing[key].trim() : '';
+    if (val) {
+      console.log(`[bot-config] Channel override: ${key} → ${val}`);
+      return val;
+    }
+    return current;
+  };
+
+  rsiNewsChannelId      = override(rsiNewsChannelId,      'rsi_comm_link');
+  rsiStatusChannelId    = override(rsiStatusChannelId,    'rsi_status');
+  rsiPatchNotesChannelId = override(rsiPatchNotesChannelId, 'rsi_patch_notes');
+  opsReminderChannelId  = override(opsReminderChannelId,  'ops_reminder');
 }
 
 async function refreshBotRuntimeConfig() {
@@ -3364,6 +3392,7 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   try {
     await refreshBotRuntimeConfig();
+    applyChannelRoutingOverrides();
 
     await startRsiCommLinkWatcher(readyClient);
     console.log('RSI Comm-Link watcher ready.');
