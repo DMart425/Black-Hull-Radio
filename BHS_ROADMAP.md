@@ -9,7 +9,7 @@ Audit status: verified against live code on 2026-05-02
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Scope & guardrails — define v1 features, role permissions, audit logs | ✅ Done |
-| 1 | Config backbone — persisted config for channel routing, toggles, role rules, snippet metadata | ❌ Not started |
+| 1 | Config backbone — persisted config for channel routing, toggles, role rules, snippet metadata | 🟡 In progress |
 | 2 | Telemetry — voice time, messages, joins/leaves, dashboard read APIs | 🟡 Partial |
 | 3 | Utility controls — Org-Lit snippet manager + embed composer with validation | 🟡 Partial |
 | 4 | Feed routing — RSI/ops/news post destinations dashboard-configurable | ❌ Not started |
@@ -129,6 +129,13 @@ Round 2 results:
 - Bot reads config on startup and hot-reloads from internal API
 - Website dashboard exposes config editor (Chief-only)
 - This unlocks Phases 4, 5, 6 (all need configurable channel routing and toggles)
+
+Phase 1 progress shipped on 2026-05-02:
+- Added Supabase table public.bot_runtime_config with singleton row `default`.
+- Added internal bot endpoint GET /api/internal/bot-config (website) with bot-secret auth.
+- Migration files added in both repos for continuity:
+	- supabase/migrations/20260502_bot_runtime_config_backbone.sql (website)
+	- migrations/20260502_bot_runtime_config_backbone.sql (bot)
 
 ---
 
