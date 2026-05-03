@@ -112,6 +112,14 @@ Prepared migration files (saved for continuity; apply separately):
 - migrations/20260502_supabase_security_hardening.sql
 - migrations/20260502_supabase_performance_indexes.sql
 
+Round 2 applied (2026-05-02):
+- migrations/20260502_supabase_hardening_round2.sql
+
+Round 2 results:
+- Cleared: security_definer_view warning for public.user.
+- Cleared: auth_rls_initplan warnings (policies rewritten to (select auth.*()) form).
+- Remaining advisors are now general performance hygiene (unused indexes, duplicate indexes, and multiple permissive policy warnings), not critical security blockers.
+
 ---
 
 ## Next Up
