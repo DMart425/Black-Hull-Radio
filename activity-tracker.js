@@ -28,8 +28,25 @@ const SUPABASE_URL              = (process.env.SUPABASE_URL              || '').
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const TRACKED_GUILD_ID          = (process.env.ACTIVITY_GUILD_ID         || process.env.GUILD_ID || '').trim();
 const AFK_CHANNEL_ID            = (process.env.ACTIVITY_AFK_CHANNEL_ID   || process.env.AFK_VOICE_CHANNEL_ID || '').trim();
-const TRACK_ALL_GAMES           = process.env.ACTIVITY_TRACK_ALL_GAMES === 'true';
+// Track all games by default; set ACTIVITY_TRACK_ALL_GAMES=false to restrict to Star Citizen only
+const TRACK_ALL_GAMES           = process.env.ACTIVITY_TRACK_ALL_GAMES !== 'false';
 const STAR_CITIZEN_APP_ID       = '355493282498600961'; // Discord application ID for Star Citizen
+
+// Known non-game apps that show up as "Playing" in Discord — excluded from tracking
+const EXCLUDED_GAME_NAMES = new Set([
+  'medal', 'medal.tv', 'medal tv',
+  'obs studio', 'obs', 'streamlabs obs', 'streamlabs',
+  'twitch studio',
+  'nvidia share', 'geforce experience', 'nvidia overlay',
+  'xbox game bar', 'xbox',
+  'elgato 4k capture utility', 'elgato video capture',
+  'action!', 'bandicam', 'fraps', 'dxtory', 'shadowplay',
+  'discord',
+]);
+
+function isExcludedGame(name) {
+  return EXCLUDED_GAME_NAMES.has(name?.toLowerCase()?.trim() ?? '');
+}
 
 // Session idle timeout — if no push within this window, close the SnareHound session
 const SNAREHOUND_IDLE_MS = 12 * 60 * 1000; // 12 minutes
@@ -168,8 +185,10 @@ function getTrackedGame(presence) {
   for (const activity of presence.activities) {
     // Activity type 0 = Playing
     if (activity.type !== 0) continue;
+    // Never track known non-game apps
+    if (isExcludedGame(activity.name)) continue;
     if (TRACK_ALL_GAMES) return activity.name;
-    // Default: only Star Citizen
+    // Restricted mode: only Star Citizen
     if (
       activity.applicationId === STAR_CITIZEN_APP_ID ||
       activity.name?.toLowerCase().includes('star citizen')
@@ -293,11 +312,137 @@ async function closeAllSessions() {
   console.log('[activity-tracker] All open sessions closed.');
 }
 
+// ── Startup resume ────────────────────────────────────────────────────────────
+
+/**
+ * On bot startup, open voice sessions for any members already sitting in voice.
+ * Call this once from the ClientReady handler after the guild is available.
+ *
+ * @param {import('discord.js').Guild} guild
+ */
+async function resumeVoiceSessions(guild) {
+  if (!isEnabled()) return;
+  if (!guild) return;
+
+  let resumed = 0;
+  for (const [, channel] of guild.channels.cache) {
+    // Only voice channels (type 2 = GuildVoice, type 13 = GuildStageVoice)
+    if (channel.type !== 2 && channel.type !== 13) continue;
+    // Skip AFK channel
+    if (AFK_CHANNEL_ID && channel.id === AFK_CHANNEL_ID) continue;
+
+    for (const [, member] of channel.members) {
+      if (member.user.bot) continue;
+      if (voiceSessions.has(member.id)) continue; // already tracked
+
+      const startedAt = new Date().toISOString();
+      const sessionId = await insertSession(member.id, 'voice');
+      if (sessionId) {
+        voiceSessions.set(member.id, { sessionId, startedAt });
+        resumed++;
+      }
+    }
+  }
+
+  if (resumed > 0) {
+    console.log(`[activity-tracker] Resumed voice sessions for ${resumed} member(s) already in voice.`);
+  }
+}
+
+/**
+ * On bot startup, open game sessions for any members already playing a tracked game.
+ * Call this once from the ClientReady handler after the guild is available.
+ *
+ * @param {import('discord.js').Guild} guild
+ */
+async function resumeGameSessions(guild) {
+  if (!isEnabled()) return;
+  if (!guild) return;
+
+  let resumed = 0;
+  for (const [, member] of guild.members.cache) {
+    if (member.user.bot) continue;
+    if (gameSessions.has(member.id)) continue; // already tracked
+
+    const gameName = getTrackedGame(member.presence);
+    if (!gameName) continue;
+
+    const startedAt = new Date().toISOString();
+    const sessionId = await insertSession(member.id, 'game', { metadata: gameName });
+    if (sessionId) {
+      gameSessions.set(member.id, { sessionId, startedAt, gameName });
+      resumed++;
+    }
+  }
+
+  if (resumed > 0) {
+    console.log(`[activity-tracker] Resumed game sessions for ${resumed} member(s) already playing.`);
+  }
+}
+
+// ── Member join / leave tracking ─────────────────────────────────────────────
+
+/**
+ * Record a member joining the guild.
+ * @param {import('discord.js').GuildMember} member
+ */
+async function onGuildMemberAdd(member) {
+  if (!isEnabled()) return;
+  if (member.user.bot) return;
+  if (TRACKED_GUILD_ID && member.guild.id !== TRACKED_GUILD_ID) return;
+
+  const db = getSupabase();
+  if (!db) return;
+
+  const { error } = await db.from('member_events').insert({
+    discord_user_id: member.id,
+    guild_id: member.guild.id,
+    event_type: 'join',
+    occurred_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    console.error('[activity-tracker] onGuildMemberAdd insert error:', error.message);
+  } else {
+    console.log(`[activity-tracker] Member joined: ${member.user.tag} (${member.id})`);
+  }
+}
+
+/**
+ * Record a member leaving the guild.
+ * @param {import('discord.js').GuildMember | import('discord.js').PartialGuildMember} member
+ */
+async function onGuildMemberRemove(member) {
+  if (!isEnabled()) return;
+  if (member.user?.bot) return;
+  if (TRACKED_GUILD_ID && member.guild.id !== TRACKED_GUILD_ID) return;
+
+  const db = getSupabase();
+  if (!db) return;
+
+  const { error } = await db.from('member_events').insert({
+    discord_user_id: member.id,
+    guild_id: member.guild.id,
+    event_type: 'leave',
+    occurred_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    console.error('[activity-tracker] onGuildMemberRemove insert error:', error.message);
+  } else {
+    console.log(`[activity-tracker] Member left: ${member.id}`);
+  }
+}
+
 module.exports = {
   onVoiceStateUpdate,
   onPresenceUpdate,
   onSnareHoundPush,
   onMessageCreate,
   closeAllSessions,
+  resumeVoiceSessions,
+  resumeGameSessions,
+  onGuildMemberAdd,
+  onGuildMemberRemove,
   isEnabled,
 };

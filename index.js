@@ -4155,6 +4155,18 @@ client.on(Events.MessageCreate, (message) => {
   });
 });
 
+client.on(Events.GuildMemberAdd, (member) => {
+  activityTracker.onGuildMemberAdd(member).catch((err) => {
+    console.error('[activity-tracker] guildMemberAdd error:', err);
+  });
+});
+
+client.on(Events.GuildMemberRemove, (member) => {
+  activityTracker.onGuildMemberRemove(member).catch((err) => {
+    console.error('[activity-tracker] guildMemberRemove error:', err);
+  });
+});
+
 process.once('SIGTERM', async () => {
   await activityTracker.closeAllSessions();
   process.exit(0);
