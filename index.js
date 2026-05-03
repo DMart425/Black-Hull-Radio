@@ -67,6 +67,17 @@ const staffOnlyCommands = new Set(['ops', 'system', 'memberadmin']);
 const adminOnlyCommands = new Set(['partykey']);
 const adminChannelCommands = new Set([...staffOnlyCommands, ...adminOnlyCommands]);
 const memberChannelCommands = new Set(['radio', 'roll', 'fleet']);
+let botRuntimeConfig = {
+  key: 'default',
+  channelRouting: {},
+  featureToggles: {},
+  roleRules: {},
+  snippetMetadata: {},
+  updatedBy: null,
+  updatedAt: null,
+  loadedAt: null,
+  source: 'env-defaults',
+};
 
 if (!token || !guildId) {
   console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
@@ -1391,6 +1402,47 @@ function formatWebsiteEndpointError(response, payload, text) {
   const fallback = `Website endpoint returned ${response.status}.`;
   const snippet = truncateText(cleanText(text), 120);
   return snippet ? `${fallback} ${snippet}` : fallback;
+}
+
+function asPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+async function refreshBotRuntimeConfig() {
+  if (!siteBaseUrl || !siteSharedSecret) {
+    return botRuntimeConfig;
+  }
+
+  try {
+    const payload = await fetchSiteJson('/api/internal/bot-config');
+    const config = payload && typeof payload === 'object' ? payload.config : null;
+
+    if (!config || typeof config !== 'object') {
+      console.warn('[bot-config] Internal endpoint returned no config payload; using defaults.');
+      return botRuntimeConfig;
+    }
+
+    botRuntimeConfig = {
+      key: cleanText(config.key) || 'default',
+      channelRouting: asPlainObject(config.channelRouting),
+      featureToggles: asPlainObject(config.featureToggles),
+      roleRules: asPlainObject(config.roleRules),
+      snippetMetadata: asPlainObject(config.snippetMetadata),
+      updatedBy: cleanText(config.updatedBy) || null,
+      updatedAt: cleanText(config.updatedAt) || null,
+      loadedAt: new Date().toISOString(),
+      source: 'website-config',
+    };
+
+    console.log(`[bot-config] Loaded config '${botRuntimeConfig.key}' from website.`);
+    return botRuntimeConfig;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[bot-config] Failed to load website config (${message}); using defaults.`);
+    return botRuntimeConfig;
+  }
 }
 
 async function fetchSiteJson(routePath, searchParams = {}) {
@@ -3311,6 +3363,8 @@ client.once(Events.ClientReady, async (readyClient) => {
   }
 
   try {
+    await refreshBotRuntimeConfig();
+
     await startRsiCommLinkWatcher(readyClient);
     console.log('RSI Comm-Link watcher ready.');
     await startRsiStatusWatcher(readyClient);
@@ -3329,6 +3383,11 @@ client.once(Events.ClientReady, async (readyClient) => {
       }, systemHeartbeatMinutes * 60 * 1000);
       console.log(`System heartbeat reporter ready (${systemHeartbeatMinutes} minute interval).`);
     }
+
+    // Resume voice and game sessions for members already active before this restart
+    const guild = readyClient.guilds.cache.get(guildId);
+    await activityTracker.resumeVoiceSessions(guild);
+    await activityTracker.resumeGameSessions(guild);
   } catch (error) {
     console.error('Startup error:', error.message);
     process.exit(1);
@@ -4059,9 +4118,17 @@ startInternalApi({
   handlers: {
     runSystemHeartbeat: () => runSystemHeartbeatRecoveryAction(client),
     runOpsReminderPoll: () => runOpsReminderPollRecoveryAction(client),
-    listPartyKeys: () => listKeys(),
-    generatePartyKey: (userId) => generateKeyForUser(userId),
+    listPartyKeys: () => listKeys({ mask: false }),
+    generatePartyKey: (userId, options = {}) => generateKeyForUser(userId, { assignedBy: options.actorUserId }),
     revokePartyKey: (userId) => revokeKeyForUser(userId),
+    revokeAllPartyKeys: ({ actorUserId } = {}) => {
+      const ownerId = partyKeyOwnerUserId || guildId;
+      if (partyKeyOwnerUserId && actorUserId !== partyKeyOwnerUserId) {
+        throw new Error('Only the designated owner can revoke all keys');
+      }
+      const revokedCount = revokeAllKeys();
+      return { revokedCount, actorUserId: actorUserId || ownerId || null };
+    },
   },
 });
 internalApiStartedAt = new Date().toISOString();
